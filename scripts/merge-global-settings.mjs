@@ -22,6 +22,7 @@ addUnique('deny', ['Read(./.env)', 'Read(./.env.*)', 'Read(./secrets/**)', 'Bash
 // 훅 등록 (이미 있으면 생략)
 s.hooks ||= {};
 s.hooks.PreToolUse ||= [];
+s.hooks.SessionStart ||= [];
 const registered = [];
 for (const name of ['guard.js', 'secrets-guard.js']) {
   if (JSON.stringify(s.hooks.PreToolUse).includes(name)) continue;
@@ -30,6 +31,12 @@ for (const name of ['guard.js', 'secrets-guard.js']) {
     hooks: [{ type: 'command', command: `node "$HOME/.claude/hooks/${name}"` }],
   });
   registered.push(name);
+}
+if (!JSON.stringify(s.hooks.SessionStart).includes('brain-recall.js')) {
+  s.hooks.SessionStart.push({
+    hooks: [{ type: 'command', command: 'node "$HOME/.claude/hooks/brain-recall.js"' }],
+  });
+  registered.push('brain-recall.js');
 }
 
 fs.mkdirSync(path.dirname(file), { recursive: true });
