@@ -39,4 +39,5 @@ harness test                                  # guard 훅 회귀 테스트
 
 - **권한**: 기본 자동 진행, `rm -rf`/`sudo`/`git push`/`curl`만 승인 요청 (`.claude/settings.json`)
 - **훅**: 승인을 건너뛰는 모드에서도 파괴적 명령(홈 삭제, 강제 푸시, 디스크 쓰기 등)은 코드로 차단 (`.claude/hooks/guard.js`)
-- **비밀**: `.env`, `secrets/` 읽기 차단
+- **비밀 커밋 차단**: `git add/commit` 직전에 API 키·암호·토큰·`.env`가 섞였는지 검사해 차단 (`.claude/hooks/secrets-guard.js`)
+- **비밀 읽기 차단**: `.env`, `secrets/` 읽기 자체를 거부

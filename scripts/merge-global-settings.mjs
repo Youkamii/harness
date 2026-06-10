@@ -19,17 +19,19 @@ const addUnique = (key, items) => {
 addUnique('ask', ['Bash(rm -rf *)', 'Bash(sudo *)', 'Bash(git push *)', 'Bash(curl *)']);
 addUnique('deny', ['Read(./.env)', 'Read(./.env.*)', 'Read(./secrets/**)', 'Bash(git push --force *)']);
 
-// guard 훅 등록 (이미 있으면 생략)
+// 훅 등록 (이미 있으면 생략)
 s.hooks ||= {};
 s.hooks.PreToolUse ||= [];
-const hasGuard = JSON.stringify(s.hooks.PreToolUse).includes('guard.js');
-if (!hasGuard) {
+const registered = [];
+for (const name of ['guard.js', 'secrets-guard.js']) {
+  if (JSON.stringify(s.hooks.PreToolUse).includes(name)) continue;
   s.hooks.PreToolUse.push({
     matcher: 'Bash',
-    hooks: [{ type: 'command', command: 'node "$HOME/.claude/hooks/guard.js"' }],
+    hooks: [{ type: 'command', command: `node "$HOME/.claude/hooks/${name}"` }],
   });
+  registered.push(name);
 }
 
 fs.mkdirSync(path.dirname(file), { recursive: true });
 fs.writeFileSync(file, JSON.stringify(s, null, 2) + '\n');
-console.log(`병합 완료: ${file} (guard 훅 ${hasGuard ? '이미 있음' : '추가됨'})`);
+console.log(`병합 완료: ${file} (훅 추가: ${registered.length ? registered.join(', ') : '없음 — 모두 등록됨'})`);

@@ -30,7 +30,8 @@ Harness/
 ├── .claude/
 │   ├── settings.json          # 권한 규칙(무엇을 자동 허용/승인/차단), hooks 등록
 │   ├── hooks/                 # 집행 스크립트 — 도구 호출을 가로채 검사·차단 (코드 레벨 강제)
-│   │                          #   guard.js(차단 규칙) + guard.test.mjs(회귀 테스트)
+│   │                          #   guard.js: 파괴적 명령 차단 / secrets-guard.js: 비밀 커밋 차단
+│   │                          #   각각 *.test.mjs 회귀 테스트 동반 (harness test 로 실행)
 │   ├── skills/                # 반복 워크플로 패키지 — /명령어 하나로 호출
 │   └── agents/                # 커스텀 서브에이전트 정의 (예: 평가자 에이전트)
 ├── orchestrator/              # 장기 실행 러너 (Node 스크립트, 빌드 불필요)

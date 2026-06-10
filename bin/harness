@@ -18,8 +18,9 @@ case "$cmd" in
   eval)    # 하네스 성능 측정: harness eval [태스크이름]
     node "$HARNESS_DIR/evals/run.mjs" "$@"
     ;;
-  test)    # guard 훅 회귀 테스트
+  test)    # 훅 회귀 테스트 전부 실행
     node "$HARNESS_DIR/.claude/hooks/guard.test.mjs"
+    node "$HARNESS_DIR/.claude/hooks/secrets-guard.test.mjs"
     ;;
   edit)    # 하네스 소스를 Claude Code로 열어 수정
     cd "$HARNESS_DIR" && exec claude
