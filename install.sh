@@ -1,27 +1,49 @@
 #!/usr/bin/env bash
-# 이 키트(훅/스킬/에이전트/규칙)를 전역(~/.claude)에 설치해 모든 프로젝트에서 쓰게 한다.
-# 이 저장소가 원본(source of truth)이며, 수정 후 다시 실행하면 갱신된다.
+# 하네스 설치 — PC당 1번만 실행하면 된다. 이후 평소 사용은 아무 폴더에서 `claude`.
+# 하네스를 수정한 뒤에는 `harness update` 로 재설치한다.
 set -euo pipefail
 
 SRC="$(cd "$(dirname "$0")" && pwd)"
 DST="$HOME/.claude"
-mkdir -p "$DST/hooks" "$DST/skills" "$DST/agents"
+BIN="$HOME/.local/bin"
 
-cp -v "$SRC/.claude/hooks/"*.js "$DST/hooks/"
-cp -Rv "$SRC/.claude/skills/"* "$DST/skills/"
-cp -v "$SRC/.claude/agents/"*.md "$DST/agents/"
+# 1) 훅/스킬/에이전트를 전역으로 복사
+mkdir -p "$DST/hooks" "$DST/skills" "$DST/agents" "$BIN"
+cp "$SRC/.claude/hooks/"*.js "$DST/hooks/"
+cp -R "$SRC/.claude/skills/"* "$DST/skills/"
+cp "$SRC/.claude/agents/"*.md "$DST/agents/"
+echo "✓ 훅/스킬/에이전트 → $DST"
 
-# CLAUDE.md 는 사용자가 직접 쓰는 파일일 수 있으므로 덮어쓰지 않는다.
+# 2) 전역 설정에 훅 등록 + 승인/차단 규칙 병합 (기존 설정 보존)
+node "$SRC/scripts/merge-global-settings.mjs"
+
+# 3) 표준 규칙(CLAUDE.md) — 이미 있으면 덮어쓰지 않음
 if [ -f "$DST/CLAUDE.md" ]; then
-  echo ""
-  echo "주의: ~/.claude/CLAUDE.md 가 이미 있어 덮어쓰지 않았습니다."
-  echo "      필요하면 $SRC/CLAUDE.md 의 '작업 방식' 절을 수동으로 합치세요."
+  if ! grep -q "하네스 표준 규칙" "$DST/CLAUDE.md"; then
+    echo "주의: ~/.claude/CLAUDE.md 가 이미 있어 보존했습니다. 필요하면 $SRC/CLAUDE.md 와 수동 병합하세요."
+  fi
 else
-  cp -v "$SRC/CLAUDE.md" "$DST/CLAUDE.md"
+  cp "$SRC/CLAUDE.md" "$DST/CLAUDE.md"
+  echo "✓ 표준 규칙 → $DST/CLAUDE.md"
 fi
 
+# 4) 전역 harness 명령 설치 (저장소 경로를 박아 넣음)
+sed "s|__HARNESS_DIR__|$SRC|" "$SRC/bin/harness" > "$BIN/harness"
+chmod +x "$BIN/harness"
+echo "✓ 명령어 → $BIN/harness"
+
+# 5) PATH 에 ~/.local/bin 이 없으면 zshrc 에 추가
+case ":$PATH:" in
+  *":$BIN:"*) ;;
+  *)
+    echo '' >> "$HOME/.zshrc"
+    echo '# harness 명령 (Harness install.sh 가 추가)' >> "$HOME/.zshrc"
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.zshrc"
+    echo "✓ ~/.zshrc 에 PATH 추가 — 새 터미널부터 적용됩니다."
+    ;;
+esac
+
 echo ""
-echo "완료. 남은 수동 단계 1개:"
-echo "  ~/.claude/settings.json 에 다음을 병합하세요 (전역 훅 등록):"
-echo '  "hooks": { "PreToolUse": [ { "matcher": "Bash", "hooks": [ { "type": "command", "command": "node \"$HOME/.claude/hooks/guard.js\"" } ] } ] }'
-echo "  권한(ask/deny) 규칙은 $SRC/.claude/settings.json 의 permissions 절 참고."
+echo "설치 완료. 사용법:"
+echo "  - 평소: 아무 폴더에서 claude 실행 (하네스 자동 적용)"
+echo "  - 그 외: harness help"

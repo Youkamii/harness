@@ -39,10 +39,12 @@ Harness/
 ├── evals/                     # 하네스 수정이 개선인지 측정
 │   ├── run.mjs                # 러너: 태스크를 빈 임시 폴더에서 실행하고 check.sh로 채점
 │   └── tasks/<이름>/          # 태스크 = task.md(지시) + check.sh(결정적 채점)
+├── bin/harness                # 전역 명령 원본 (install.sh 가 ~/.local/bin/harness 로 설치)
+├── scripts/                   # 설치 보조 (전역 settings.json 병합 등)
 ├── docs/
 │   ├── architecture.md        # 이 문서
 │   └── harness-engineering-research.md  # 기반 리서치
-└── install.sh                 # 이 키트를 다른 프로젝트/전역(~/.claude)에 적용하는 스크립트
+└── install.sh                 # PC당 1회 실행: 전역(~/.claude) 설치 + harness 명령 등록
 ```
 
 ## "X를 바꾸고 싶으면 어디를 보나"
@@ -61,9 +63,9 @@ Harness/
 
 ## 적용 범위
 
-`.claude/`와 `CLAUDE.md`는 기본적으로 **이 폴더에서 Claude Code를 실행할 때** 적용된다.
-다른 프로젝트에서도 쓰려면 `install.sh`로 전역(`~/.claude/`)에 설치하거나 해당 프로젝트에 복사한다.
-이 저장소가 원본(source of truth)이고, git으로 변경 이력을 관리한다.
+`install.sh`를 PC당 1회 실행하면 전역(`~/.claude/`)에 설치되어 **모든 폴더의 `claude`에 자동 적용**되고,
+`harness` 명령(`~/.local/bin/harness`)이 생긴다. 이 저장소가 원본(source of truth)이며,
+하네스를 수정하면 `harness update`(git pull + 재설치)로 어느 PC에서든 반영한다.
 
 ## 설계 원칙 (리서치에서 검증된 것)
 

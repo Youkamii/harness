@@ -8,18 +8,24 @@
 ## 빠른 사용법
 
 ```bash
-# 1) 이 폴더에서 그냥 claude 실행 — 개조(훅·권한·스킬)가 자동 적용됨
-claude
-
-# 2) 다른 모든 프로젝트에도 적용하려면 전역 설치
+# 최초 1회 (PC마다): 전역 설치 — harness 명령이 생긴다
 ./install.sh
 
-# 3) 장기 실행 (구독 한도 도달 시 자동 대기 후 재개)
-node orchestrator/run.mjs "만들 것에 대한 목표 설명" --cwd ~/Git/대상프로젝트
-
-# 4) 하네스를 수정했으면 측정
-node evals/run.mjs
+# 이후 평소 사용: 아무 폴더에서 claude 실행하면 하네스가 자동 적용됨
+claude
 ```
+
+`harness` 명령 (설치 후 어디서나):
+
+```bash
+harness run "목표" --cwd ~/Git/대상프로젝트   # 장기 실행 (한도 도달 시 자동 대기)
+harness eval                                  # 하네스 성능 측정
+harness update                                # 다른 PC에서 수정사항 받기 (git pull + 재설치)
+harness edit                                  # 하네스 소스를 Claude Code로 열기
+harness test                                  # guard 훅 회귀 테스트
+```
+
+새 PC에 설치: `git clone <저장소주소> ~/Git/Harness && ~/Git/Harness/install.sh`
 
 ## 세션 안에서 쓰는 명령
 
