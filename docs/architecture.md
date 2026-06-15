@@ -40,12 +40,14 @@ Harness/
 ├── evals/                     # 하네스 수정이 개선인지 측정
 │   ├── run.mjs                # 러너: 태스크를 빈 임시 폴더에서 실행하고 check.sh로 채점
 │   └── tasks/<이름>/          # 태스크 = task.md(지시) + check.sh(결정적 채점)
-├── bin/harness                # 전역 명령 원본 (install.sh 가 ~/.local/bin/harness 로 설치)
-├── scripts/                   # 설치 보조 (전역 settings.json 병합 등)
+├── bin/harness                # 전역 명령 원본 — macOS/Linux (install.sh 가 ~/.local/bin/harness 로 설치)
+├── bin/harness.ps1            # 전역 명령 원본 — Windows (install.ps1 이 harness.cmd shim 으로 등록)
+├── scripts/                   # 설치 보조 (전역 settings.json 병합 등, 크로스플랫폼 Node)
 ├── docs/
 │   ├── architecture.md        # 이 문서
 │   └── harness-engineering-research.md  # 기반 리서치
-└── install.sh                 # PC당 1회 실행: 전역(~/.claude) 설치 + harness 명령 등록
+├── install.sh                 # PC당 1회 실행 (macOS/Linux): 전역(~/.claude) 설치 + harness 명령 등록
+└── install.ps1                 # PC당 1회 실행 (Windows): 위와 동일한 PowerShell 대응판
 ```
 
 ## "X를 바꾸고 싶으면 어디를 보나"
@@ -64,9 +66,14 @@ Harness/
 
 ## 적용 범위
 
-`install.sh`를 PC당 1회 실행하면 전역(`~/.claude/`)에 설치되어 **모든 폴더의 `claude`에 자동 적용**되고,
-`harness` 명령(`~/.local/bin/harness`)이 생긴다. 이 저장소가 원본(source of truth)이며,
-하네스를 수정하면 `harness update`(git pull + 재설치)로 어느 PC에서든 반영한다.
+`install.sh`(Windows는 `install.ps1`)를 PC당 1회 실행하면 전역(`~/.claude/`)에 설치되어
+**모든 폴더의 `claude`에 자동 적용**되고, `harness` 명령(`~/.local/bin/`)이 생긴다.
+이 저장소가 원본(source of truth)이며, 하네스를 수정하면 `harness update`(git pull + 재설치)로
+어느 PC에서든 반영한다.
+
+플랫폼 메모: 훅(`*.js`)·스킬·`CLAUDE.md`·설정 병합은 Node/마크다운이라 OS 중립이다. OS에 묶이는 것은
+설치/런처(bash ↔ PowerShell)뿐이라, 두 설치 경로가 같은 `.claude/` 자산을 전역에 깐다. Windows에서는
+`merge-global-settings.mjs`가 훅 명령을 절대경로로 등록한다(셸이 `$HOME`을 확장하지 못하므로).
 
 ## 설계 원칙 (리서치에서 검증된 것)
 
