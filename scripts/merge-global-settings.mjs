@@ -20,6 +20,16 @@ addUnique('ask', ['Bash(rm -rf *)', 'Bash(sudo *)', 'Bash(git push *)', 'Bash(cu
 addUnique('deny', ['Read(./.env)', 'Read(./.env.*)', 'Read(./secrets/**)', 'Bash(git push --force *)']);
 
 // 훅 등록 (이미 있으면 생략)
+// 훅 명령의 홈 경로 표기는 플랫폼별로 다르다:
+//   - Unix: `$HOME` 을 셸이 확장하므로 그대로 둔다 (이식성).
+//   - Windows: cmd/PowerShell 은 `$HOME` 을 확장하지 못하므로 설치 시점의 절대경로를 박는다.
+//     settings.json 자체가 PC별(~/.claude)이라 절대경로여도 이식성 손해가 없다.
+const hooksDir =
+  process.platform === 'win32'
+    ? path.join(os.homedir(), '.claude', 'hooks')
+    : '$HOME/.claude/hooks';
+const hookCmd = (name) => `node "${path.join(hooksDir, name)}"`;
+
 s.hooks ||= {};
 s.hooks.PreToolUse ||= [];
 s.hooks.SessionStart ||= [];
@@ -28,13 +38,13 @@ for (const name of ['guard.js', 'secrets-guard.js']) {
   if (JSON.stringify(s.hooks.PreToolUse).includes(name)) continue;
   s.hooks.PreToolUse.push({
     matcher: 'Bash',
-    hooks: [{ type: 'command', command: `node "$HOME/.claude/hooks/${name}"` }],
+    hooks: [{ type: 'command', command: hookCmd(name) }],
   });
   registered.push(name);
 }
 if (!JSON.stringify(s.hooks.SessionStart).includes('brain-recall.js')) {
   s.hooks.SessionStart.push({
-    hooks: [{ type: 'command', command: 'node "$HOME/.claude/hooks/brain-recall.js"' }],
+    hooks: [{ type: 'command', command: hookCmd('brain-recall.js') }],
   });
   registered.push('brain-recall.js');
 }
