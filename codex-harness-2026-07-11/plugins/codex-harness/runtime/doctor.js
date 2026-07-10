@@ -1,3 +1,4 @@
+import path from "node:path";
 import { resolveCodexExecutable } from "./executables.js";
 import { runProcess } from "./process.js";
 import { githubControllerEnvironment, redactSecrets, sanitizedEnvironment } from "./redact.js";
@@ -22,6 +23,8 @@ export async function runDoctor(repoRoot) {
         checks.push(await commandCheck("verification-sandbox", codex, [
             "sandbox",
             "--sandbox-state-disable-network",
+            "--sandbox-state-readable-root",
+            path.dirname(process.execPath),
             "-P",
             ":workspace",
             "-C",

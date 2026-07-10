@@ -61,6 +61,8 @@ async function runChecks(store, runId, taskId, phase, options = {}) {
             args: [
                 "sandbox",
                 "--sandbox-state-disable-network",
+                "--sandbox-state-readable-root",
+                path.dirname(executable),
                 "-P",
                 ":workspace",
                 "-C",
@@ -210,12 +212,12 @@ async function resolveExecutable(executable, cwd, worktree, env) {
         const candidate = candidates.find((value) => /\.(?:exe|com|cmd|bat)$/i.test(value));
         if (!candidate)
             throw new Error(`verification executable has no runnable Windows shim: ${executable}`);
-        return candidate;
+        return await realpath(candidate);
     }
     const candidate = candidates[0];
     if (!candidate)
         throw new Error(`verification executable not found: ${executable}`);
-    return candidate;
+    return await realpath(candidate);
 }
 function requireTask(state, taskId) {
     const task = state.tasks.find((candidate) => candidate.id === taskId);

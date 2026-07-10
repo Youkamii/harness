@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc -p plugins/codex-harness/tsconfig.json",
     "check": "tsc -p plugins/codex-harness/tsconfig.json --noEmit",
-    "test": "npm run build && node --test plugins/codex-harness/test/*.test.mjs",
+    "test": "npm run build && node scripts/test.mjs",
     "validate": "node scripts/validate.mjs",
     "eval": "npm run build && node scripts/eval.mjs",
     "doctor": "npm run build && node plugins/codex-harness/runtime/cli.js doctor",
