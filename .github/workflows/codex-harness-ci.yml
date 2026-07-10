@@ -4,10 +4,12 @@ on:
   push:
     branches: [main]
     paths:
+      - "README.md"
       - "codex-harness-2026-07-11/**"
       - ".github/workflows/codex-harness-ci.yml"
   pull_request:
     paths:
+      - "README.md"
       - "codex-harness-2026-07-11/**"
       - ".github/workflows/codex-harness-ci.yml"
 
