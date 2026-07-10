@@ -1,0 +1,5 @@
+evals/results/
+.harness/
+node_modules/
+.gstack/
+.obsidian/
