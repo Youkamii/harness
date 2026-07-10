@@ -2,6 +2,7 @@ import path from "node:path";
 import { resolveCodexExecutable } from "./executables.js";
 import { runProcess } from "./process.js";
 import { githubControllerEnvironment, offlineEnvironment, redactSecrets, sanitizedEnvironment } from "./redact.js";
+import { assertSandboxNetworkIsolation } from "./sandbox-network.js";
 
 export interface DoctorCheck {
   name: string;
@@ -36,27 +37,40 @@ export async function runDoctor(repoRoot: string): Promise<{ passed: boolean; ch
       codexCheck.detail += " (minimum supported version is 0.144.1)";
     }
     checks.push(codexCheck);
-    checks.push(
-      await commandCheck(
-        "verification-sandbox",
-        codex,
-        [
-          "sandbox",
-          "--sandbox-state-disable-network",
-          "--sandbox-state-readable-root",
-          path.dirname(process.execPath),
-          "-P",
-          ":workspace",
-          "-C",
+    try {
+      await assertSandboxNetworkIsolation({
+        codexExecutable: codex,
+        cwd: repoRoot,
+        env: offlineEnvironment(),
+      });
+      checks.push(
+        await commandCheck(
+          "verification-sandbox",
+          codex,
+          [
+            "sandbox",
+            "--sandbox-state-disable-network",
+            "--sandbox-state-readable-root",
+            path.dirname(process.execPath),
+            "-P",
+            ":workspace",
+            "-C",
+            repoRoot,
+            "--",
+            process.execPath,
+            "--version",
+          ],
           repoRoot,
-          "--",
-          process.execPath,
-          "--version",
-        ],
-        repoRoot,
-        offlineEnvironment(),
-      ),
-    );
+          offlineEnvironment(),
+        ),
+      );
+    } catch (error) {
+      checks.push({
+        name: "verification-sandbox",
+        passed: false,
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    }
   } catch (error) {
     checks.push({
       name: "codex",

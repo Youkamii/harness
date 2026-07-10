@@ -98,7 +98,14 @@ test("verification sandbox strips credentials and disables network", { skip: !ha
         required: true,
       },
     ], async (store, state) => {
-      const result = await verifyTask(store, state.id, "safe-check");
+      let result;
+      try {
+        result = await verifyTask(store, state.id, "safe-check");
+      } catch (error) {
+        assert.equal(process.platform, "win32");
+        assert.match(String(error), /verification network isolation is unavailable/);
+        return;
+      }
       assert.equal(result.passed, true, JSON.stringify(result.results, null, 2));
       assert.deepEqual(result.results.map((entry) => entry.exitCode), [0, 0]);
     });
@@ -115,7 +122,15 @@ test("verification rejects a passing command that mutates tracked scope", { skip
       required: true,
     },
   ], async (store, state) => {
-    const result = await verifyTask(store, state.id, "safe-check");
+    let result;
+    try {
+      result = await verifyTask(store, state.id, "safe-check");
+    } catch (error) {
+      assert.equal(process.platform, "win32");
+      assert.match(String(error), /verification network isolation is unavailable/);
+      await assert.rejects(access(path.join(state.tasks[0].worktreePath, "mutated.txt")), /ENOENT/);
+      return;
+    }
     assert.equal(result.passed, false);
     assert.equal(result.results[0].exitCode, -2, JSON.stringify(result.results, null, 2));
     assert.equal(result.results[0].mutated, true);
@@ -131,7 +146,15 @@ test("baseline reports repository mutation to its caller", { skip: !hasCodex }, 
       required: true,
     },
   ], async (store, state) => {
-    const results = await captureBaseline(store, state.id, "safe-check");
+    let results;
+    try {
+      results = await captureBaseline(store, state.id, "safe-check");
+    } catch (error) {
+      assert.equal(process.platform, "win32");
+      assert.match(String(error), /verification network isolation is unavailable/);
+      await assert.rejects(access(path.join(state.tasks[0].worktreePath, "baseline-mutation.txt")), /ENOENT/);
+      return;
+    }
     assert.equal(results[0].mutated, true, JSON.stringify(results, null, 2));
     assert.equal(results[0].exitCode, -2);
   }, { transitionToVerifying: false });

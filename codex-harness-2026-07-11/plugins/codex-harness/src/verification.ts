@@ -8,6 +8,7 @@ import { addEvidence, setTaskStatus } from "./operations.js";
 import { offlineEnvironment, redactSecrets } from "./redact.js";
 import { realpathWithin, workspaceFingerprint } from "./repo.js";
 import { runProcess } from "./process.js";
+import { assertSandboxNetworkIsolation } from "./sandbox-network.js";
 import { RunStore } from "./store.js";
 
 export interface CheckResult {
@@ -101,6 +102,7 @@ async function runChecks(
   for (const command of task.checks) {
     const cwd = await realpathWithin(worktree, path.resolve(worktree, command.cwd ?? "."));
     const executable = await resolveExecutable(command.argv[0] ?? "", cwd, worktree, environment);
+    await assertSandboxNetworkIsolation({ codexExecutable, cwd, env: environment });
     const result = await runProcess({
       executable: codexExecutable,
       args: [
