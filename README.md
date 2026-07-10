@@ -19,8 +19,8 @@ Claude Code 위에 얹는 **개인 전용 하네스**. 핵심 철학: `Agent = M
 | `skills/harness` | 하네스 자기관리: 점검·패턴 추가·재배포 |
 | `agents/red-reviewer.md` | 적대적 리뷰어 (렌즈 지정형, 반증 가능한 보고만) |
 | `agents/verifier.md` | 독립 검증자 (실행해서 확인됨/실패/미검증 판정) |
-| `hooks/guard.js` | 파괴 명령 가드: 루트/홈 삭제·main 강제 푸시 차단(deny), rm -rf·reset --hard는 모델에게만 경고 주입(warn) — 사용자를 절대 호출하지 않음. 회귀 테스트 27케이스 |
-| `hooks/secrets-guard.mjs` | 비밀 커밋 차단: git add/commit 직전 API 키·.env·개인키 검사 |
+| `hooks/guard.js` | 파괴 명령 가드: 루트/홈/시스템 디렉터리 삭제·main 강제 푸시 차단(deny), rm -rf·reset --hard는 모델에게만 경고 주입(warn) — 사용자를 절대 호출하지 않음. 회귀 테스트 35케이스 |
+| `hooks/secrets-guard.mjs` | 비밀 커밋 차단: git add/commit(-a 포함, cd 복합 명령 추적) 직전 API 키·.env·개인키 검사. 회귀 테스트 6케이스 |
 | `install.mjs` | 멱등 설치기: 테스트 → 복사 → settings.json/CLAUDE.md 병합 |
 
 ## 설치
@@ -40,11 +40,13 @@ Node.js 필요. 몇 번을 다시 실행해도 안전하다(멱등). 기존 `~/.
 ## 사용 흐름
 
 ```
-새 기능 시작   → /kickoff   (태스크·이슈·기능별 커밋·검증·리뷰가 한 파이프라인)
-코드 완성 직후 → /red-review (커밋/푸시 전 적대 리뷰)
+새 기능 시작   → /kickoff   (태스크·이슈 → 검증 → 기능별 커밋 → 리뷰 → 푸시가 한 파이프라인)
+푸시 전        → /red-review (적대 리뷰 1회 — 기능마다가 아니라 푸시 전 묶음으로)
 작업 끝낼 때   → /wrapup    (검증 상태·남은 일·교훈 정리)
-하네스 점검    → /harness   (훅 등록·테스트·레포-로컬 동기화 확인)
+하네스 점검    → /harness   (훅 등록·회귀 테스트·실발화·동기화 확인)
 ```
+
+알려진 한계: guard는 명령 문자열 전체를 검사하므로 echo나 커밋 메시지 속 위험 패턴도 차단될 수 있다(의도된 보수성 — 우회는 파일 경유). 자세한 근거는 각 훅 파일 상단 주석 참고.
 
 ## 유지보수 규칙
 

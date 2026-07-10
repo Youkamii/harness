@@ -3,6 +3,9 @@
 // 사용자를 절대 호출하지 않는다(ask 금지) — 오토 퍼미션을 준 사용자를 훅이 도로 불러세우면 안 된다 (2026-07-11 사용자 지시).
 // 판단 대상이 아니면 아무 출력 없이 종료 → 일반 권한 흐름으로 넘어간다.
 // 파싱 실패 시 개입하지 않는다(fail-open): 가드 버그가 모든 셸 명령을 마비시키면 안 된다.
+// 알려진 한계(의도된 보수성): 명령 문자열 전체를 검사하므로 echo/커밋 메시지 등 문자열
+// 리터럴 안의 위험 패턴도 걸린다. 따옴표를 벗기면 bash -c "..." 우회가 뚫리므로 벗기지 않는다.
+// 그런 오탐을 만나면 위험 문자열을 파일에 써서(Write 도구) 파이프하는 식으로 우회하라.
 
 let raw = '';
 process.stdin.on('data', (d) => (raw += d));
@@ -47,13 +50,13 @@ process.stdin.on('end', () => {
   if (/\bmkfs(\.\w+)?\b/.test(cmd)) deny('[guard] 파일시스템 포맷(mkfs) 차단');
   if (/\bdd\b[^;|&]*\bof=\/dev\//.test(cmd)) deny('[guard] 디바이스 직접 쓰기(dd of=/dev/*) 차단');
 
-  // 루트/홈/드라이브 전체를 가리키는 토큰
+  // 루트/홈/드라이브/시스템 디렉터리 전체를 가리키는 토큰 (글롭 /* 형태 포함 — 리뷰 발견 #2)
   const ROOT =
-    /(^|\s)["']?(\/|~[\/\\]?|\$HOME[\/\\]?|\$env:USERPROFILE[\/\\]?|%USERPROFILE%[\/\\]?|[A-Za-z]:[\/\\]{0,2}|[Cc]:[\/\\]+Users[\/\\]+gkfkd[\/\\]?)["']?(\s|$)/;
+    /(^|\s)["']?(\/\*?|~([\/\\]\*?)?|\$HOME([\/\\]\*?)?|\$env:USERPROFILE([\/\\]\*?)?|%USERPROFILE%([\/\\]\*?)?|[A-Za-z]:[\/\\]{0,2}\*?|[Cc]:[\/\\]+Users[\/\\]+gkfkd([\/\\]\*?)?|\/(etc|usr|bin|sbin|lib|lib64|home|var|boot|opt|root|dev|sys)[\/\\]?)["']?(\s|$)/;
 
-  // rm: recursive + force 조합
-  const rFlag = /(^|\s)(-[a-zA-Z]*r[a-zA-Z]*|--recursive)(\s|$)/.test(cmd);
-  const fFlag = /(^|\s)(-[a-zA-Z]*f[a-zA-Z]*|--force)(\s|$)/.test(cmd);
+  // rm: recursive + force 조합 (대문자 -R/-F 우회 방지 — 리뷰 발견 #1)
+  const rFlag = /(^|\s)(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)(\s|$)/.test(cmd);
+  const fFlag = /(^|\s)(-[a-zA-Z]*[fF][a-zA-Z]*|--force)(\s|$)/.test(cmd);
   if (/\brm\b/.test(cmd) && rFlag && fFlag) {
     if (ROOT.test(cmd)) deny('[guard] 루트/홈/드라이브 전체 삭제 차단');
     warn('[guard] 재귀 강제 삭제(rm -rf).');
@@ -72,7 +75,8 @@ process.stdin.on('end', () => {
     const force =
       /(^|\s)(--force(?!-with-lease)|-f)(\s|$)/.test(seg) || /\s\+\S+/.test(seg);
     if (force) {
-      if (/\b(main|master)\b/.test(seg))
+      // main이 목적지 토큰일 때만 차단 — main-backup 같은 브랜치명 오탐 방지 (리뷰 발견 #6)
+      if (/(\s|:|\+)(main|master)(\s|$)/.test(seg))
         deny('[guard] main/master 강제 푸시 차단 — 필요하면 --force-with-lease를 별도 브랜치에');
       warn('[guard] 강제 푸시.');
     }

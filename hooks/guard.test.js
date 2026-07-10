@@ -32,6 +32,17 @@ const cases = [
   ['grep -rf pattern file.txt', 'none'],
   ['mkfs.ext4 /dev/sda1', 'deny'],
   ['echo hello > out.txt', 'none'],
+  // 리뷰 발견 #1: 대문자 플래그 우회
+  ['rm -Rf /', 'deny'],
+  ['rm -rF ~', 'deny'],
+  ['rm -R -f build', 'warn'],
+  // 리뷰 발견 #2: 루트 글롭·시스템 디렉터리
+  ['rm -rf /*', 'deny'],
+  ['rm -rf /etc', 'deny'],
+  ['rm -rf /tmp/xyz', 'warn'],
+  // 리뷰 발견 #6: 브랜치명 오탐/목적지 판별
+  ['git push --force origin main-backup', 'warn'],
+  ['git push -f origin dev:main', 'deny'],
 ];
 let fail = 0;
 for (const [cmd, expect] of cases) {
