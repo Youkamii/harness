@@ -99,7 +99,7 @@ test("verification sandbox strips credentials and disables network", { skip: !ha
       },
     ], async (store, state) => {
       const result = await verifyTask(store, state.id, "safe-check");
-      assert.equal(result.passed, true);
+      assert.equal(result.passed, true, JSON.stringify(result.results, null, 2));
       assert.deepEqual(result.results.map((entry) => entry.exitCode), [0, 0]);
     });
   } finally {
@@ -117,7 +117,7 @@ test("verification rejects a passing command that mutates tracked scope", { skip
   ], async (store, state) => {
     const result = await verifyTask(store, state.id, "safe-check");
     assert.equal(result.passed, false);
-    assert.equal(result.results[0].exitCode, -2);
+    assert.equal(result.results[0].exitCode, -2, JSON.stringify(result.results, null, 2));
     assert.equal(result.results[0].mutated, true);
     const loaded = await store.load(state.id);
     assert.match(loaded.evidence.at(-1).summary, /evidence rejected/);
@@ -132,7 +132,7 @@ test("baseline reports repository mutation to its caller", { skip: !hasCodex }, 
     },
   ], async (store, state) => {
     const results = await captureBaseline(store, state.id, "safe-check");
-    assert.equal(results[0].mutated, true);
+    assert.equal(results[0].mutated, true, JSON.stringify(results, null, 2));
     assert.equal(results[0].exitCode, -2);
   }, { transitionToVerifying: false });
 });
