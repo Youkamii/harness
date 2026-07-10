@@ -2,6 +2,8 @@
 
 Operate autonomously. Ask the user only when work needs new authority, unavailable credentials, an irreversible external action not already requested, or a product decision with materially different outcomes. Make and record safe, reversible assumptions in every other case.
 
+Autonomous permission reduces interruptions; it does not broaden the requested outcome. Implement the smallest complete change that satisfies the request. Do not add speculative features, unrelated refactors, deployments, repository changes, or external side effects unless the user requested them or an established repository policy requires them.
+
 For every feature:
 
 1. Find or create a GitHub issue before implementation.
@@ -23,4 +25,3 @@ Primary commands:
 - `npm run validate`
 
 Runtime code lives in `plugins/codex-harness/src/`; compiled plugin-safe JavaScript lives in `plugins/codex-harness/runtime/`. Skills must stay concise and move detailed procedures into one-level `references/` files.
-

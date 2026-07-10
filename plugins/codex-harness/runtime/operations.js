@@ -141,4 +141,64 @@ function requireTask(state, taskId) {
         throw new Error(`unknown task: ${taskId}`);
     return task;
 }
+export async function startAgentAttempt(store, runId, input) {
+    const attempt = {
+        id: randomUUID(),
+        role: input.role,
+        sandbox: input.sandbox,
+        cwd: input.cwd,
+        status: "starting",
+        startedAt: new Date().toISOString(),
+        ...(input.taskId ? { taskId: input.taskId } : {}),
+    };
+    await store.update(runId, "agent.started", (state) => {
+        state.attempts.push(attempt);
+        return state;
+    }, { attemptId: attempt.id, role: attempt.role, taskId: attempt.taskId });
+    return attempt;
+}
+export async function recordAssumptions(store, runId, assumptions) {
+    const normalized = [...new Set(assumptions.map((value) => value.trim()).filter(Boolean))].slice(0, 20);
+    return await store.update(runId, "run.assumptions.recorded", (state) => {
+        state.assumptions = normalized;
+        return state;
+    }, { count: normalized.length });
+}
+export async function recordNonGoals(store, runId, nonGoals) {
+    const normalized = [...new Set(nonGoals.map((value) => value.trim()).filter(Boolean))].slice(0, 20);
+    return await store.update(runId, "run.non-goals.recorded", (state) => {
+        state.nonGoals = normalized;
+        return state;
+    }, { count: normalized.length });
+}
+export async function recordAgentThread(store, runId, attemptId, threadId) {
+    if (!/^[0-9a-f-]{36}$/i.test(threadId))
+        throw new Error("invalid Codex thread id");
+    return await store.update(runId, "agent.thread.recorded", (state) => {
+        const attempt = requireAttempt(state, attemptId);
+        if (attempt.threadId && attempt.threadId !== threadId) {
+            throw new Error("agent thread id is immutable");
+        }
+        attempt.threadId = threadId;
+        attempt.status = "running";
+        return state;
+    }, { attemptId, threadId });
+}
+export async function finishAgentAttempt(store, runId, attemptId, result) {
+    return await store.update(runId, "agent.finished", (state) => {
+        const attempt = requireAttempt(state, attemptId);
+        attempt.status = result.status;
+        attempt.exitCode = result.exitCode;
+        attempt.completedAt = new Date().toISOString();
+        if (result.failureFingerprint)
+            attempt.failureFingerprint = result.failureFingerprint;
+        return state;
+    }, { attemptId, ...result });
+}
+function requireAttempt(state, attemptId) {
+    const attempt = state.attempts.find((candidate) => candidate.id === attemptId);
+    if (!attempt)
+        throw new Error(`unknown agent attempt: ${attemptId}`);
+    return attempt;
+}
 //# sourceMappingURL=operations.js.map

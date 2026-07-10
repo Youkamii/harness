@@ -100,6 +100,20 @@ export interface ExternalEffect {
   result?: Record<string, unknown>;
 }
 
+export interface AgentAttempt {
+  id: string;
+  role: "planner" | "builder" | "acceptance-auditor" | "adversarial-reviewer";
+  status: "starting" | "running" | "complete" | "failed" | "timed-out";
+  sandbox: "read-only" | "workspace-write";
+  cwd: string;
+  startedAt: string;
+  completedAt?: string;
+  taskId?: string;
+  threadId?: string;
+  exitCode?: number;
+  failureFingerprint?: string;
+}
+
 export interface RunState {
   schemaVersion: 1;
   id: string;
@@ -112,9 +126,11 @@ export interface RunState {
   updatedAt: string;
   sequence: number;
   assumptions: string[];
+  nonGoals: string[];
   tasks: HarnessTask[];
   evidence: EvidenceRecord[];
   outbox: ExternalEffect[];
+  attempts: AgentAttempt[];
   issue?: GitHubIssue;
   blockedReason?: string;
 }
@@ -152,9 +168,10 @@ export function assertRunTransition(from: RunStatus, to: RunStatus): void {
   }
 }
 
-export function currentConfigHash(state: Pick<RunState, "lane" | "tasks">): string {
+export function currentConfigHash(state: Pick<RunState, "lane" | "tasks" | "nonGoals">): string {
   const normalized = {
     lane: state.lane,
+    nonGoals: state.nonGoals,
     tasks: state.tasks.map(({ id, dependencies, acceptanceCriteria, ownedPaths, checks, risk }) => ({
       id,
       dependencies,

@@ -11,6 +11,8 @@ Treat the user's request as an outcome to finish, not a conversation to prolong.
 
 Proceed with safe, reversible assumptions. Do not ask for preferences that can be inferred from the repository, tests, established conventions, or upstream documentation.
 
+Treat automatic permission as authority to execute the requested outcome without hand-holding, not authority to expand it. Choose the smallest complete implementation. Do not add adjacent features, broad refactors, deployments, changes to other repositories, or unrelated external actions unless explicitly requested or required by established repository policy.
+
 Ask only when at least one condition holds:
 
 - required authority or credentials are unavailable;
@@ -41,6 +43,7 @@ node "<skill-directory>/scripts/forge.mjs" status
 1. **Ground the task.** Inspect code, tests, Git status, relevant history, and current upstream documentation when facts may have changed.
 2. **Create the issue.** Reuse a matching open issue carrying the run marker; otherwise create a bounded GitHub issue with goal, acceptance criteria, and task outline. Never publish secrets, raw logs, or proprietary source in the issue body.
 3. **Plan the DAG.** Split work into independently verifiable feature tasks. Assign file ownership, dependencies, checks, and completion evidence. Reject circular dependencies.
+   Record explicit non-goals so autonomous execution cannot silently broaden scope.
 4. **Choose a lane.**
    - Fast: one bounded writer and targeted verification.
    - Build: scout, writer, verifier, and one independent reviewer.

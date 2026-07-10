@@ -67,6 +67,19 @@ export interface ExternalEffect {
     completedAt?: string;
     result?: Record<string, unknown>;
 }
+export interface AgentAttempt {
+    id: string;
+    role: "planner" | "builder" | "acceptance-auditor" | "adversarial-reviewer";
+    status: "starting" | "running" | "complete" | "failed" | "timed-out";
+    sandbox: "read-only" | "workspace-write";
+    cwd: string;
+    startedAt: string;
+    completedAt?: string;
+    taskId?: string;
+    threadId?: string;
+    exitCode?: number;
+    failureFingerprint?: string;
+}
 export interface RunState {
     schemaVersion: 1;
     id: string;
@@ -79,9 +92,11 @@ export interface RunState {
     updatedAt: string;
     sequence: number;
     assumptions: string[];
+    nonGoals: string[];
     tasks: HarnessTask[];
     evidence: EvidenceRecord[];
     outbox: ExternalEffect[];
+    attempts: AgentAttempt[];
     issue?: GitHubIssue;
     blockedReason?: string;
 }
@@ -97,7 +112,7 @@ export interface JournalEvent {
     hash: string;
 }
 export declare function assertRunTransition(from: RunStatus, to: RunStatus): void;
-export declare function currentConfigHash(state: Pick<RunState, "lane" | "tasks">): string;
+export declare function currentConfigHash(state: Pick<RunState, "lane" | "tasks" | "nonGoals">): string;
 export interface CompletionResult {
     allowed: boolean;
     reasons: string[];

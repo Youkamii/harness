@@ -1,4 +1,4 @@
-import { type EvidenceRecord, type ExternalEffect, type GitHubIssue, type PlannedTask, type RunState, type RunStatus, type TaskStatus } from "./domain.js";
+import { type AgentAttempt, type EvidenceRecord, type ExternalEffect, type GitHubIssue, type PlannedTask, type RunState, type RunStatus, type TaskStatus } from "./domain.js";
 import { RunStore } from "./store.js";
 export declare function applyPlan(store: RunStore, runId: string, tasks: PlannedTask[]): Promise<RunState>;
 export declare function transitionRun(store: RunStore, runId: string, to: RunStatus, options?: {
@@ -18,3 +18,14 @@ export declare function beginEffect(store: RunStore, runId: string, input: Pick<
     effect: ExternalEffect;
 }>;
 export declare function completeEffect(store: RunStore, runId: string, effectId: string, result: Record<string, unknown>): Promise<RunState>;
+export declare function startAgentAttempt(store: RunStore, runId: string, input: Pick<AgentAttempt, "role" | "sandbox" | "cwd"> & {
+    taskId?: string;
+}): Promise<AgentAttempt>;
+export declare function recordAssumptions(store: RunStore, runId: string, assumptions: string[]): Promise<RunState>;
+export declare function recordNonGoals(store: RunStore, runId: string, nonGoals: string[]): Promise<RunState>;
+export declare function recordAgentThread(store: RunStore, runId: string, attemptId: string, threadId: string): Promise<RunState>;
+export declare function finishAgentAttempt(store: RunStore, runId: string, attemptId: string, result: {
+    status: "complete" | "failed" | "timed-out";
+    exitCode: number;
+    failureFingerprint?: string;
+}): Promise<RunState>;

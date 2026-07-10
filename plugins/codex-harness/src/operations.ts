@@ -3,6 +3,7 @@ import {
   assertRunTransition,
   currentConfigHash,
   evaluateCompletion,
+  type AgentAttempt,
   type EvidenceRecord,
   type ExternalEffect,
   type GitHubIssue,
@@ -237,4 +238,118 @@ function requireTask(state: RunState, taskId: string) {
   const task = state.tasks.find((candidate) => candidate.id === taskId);
   if (!task) throw new Error(`unknown task: ${taskId}`);
   return task;
+}
+
+export async function startAgentAttempt(
+  store: RunStore,
+  runId: string,
+  input: Pick<AgentAttempt, "role" | "sandbox" | "cwd"> & { taskId?: string },
+): Promise<AgentAttempt> {
+  const attempt: AgentAttempt = {
+    id: randomUUID(),
+    role: input.role,
+    sandbox: input.sandbox,
+    cwd: input.cwd,
+    status: "starting",
+    startedAt: new Date().toISOString(),
+    ...(input.taskId ? { taskId: input.taskId } : {}),
+  };
+  await store.update(
+    runId,
+    "agent.started",
+    (state) => {
+      state.attempts.push(attempt);
+      return state;
+    },
+    { attemptId: attempt.id, role: attempt.role, taskId: attempt.taskId },
+  );
+  return attempt;
+}
+
+export async function recordAssumptions(
+  store: RunStore,
+  runId: string,
+  assumptions: string[],
+): Promise<RunState> {
+  const normalized = [...new Set(assumptions.map((value) => value.trim()).filter(Boolean))].slice(0, 20);
+  return await store.update(
+    runId,
+    "run.assumptions.recorded",
+    (state) => {
+      state.assumptions = normalized;
+      return state;
+    },
+    { count: normalized.length },
+  );
+}
+
+export async function recordNonGoals(
+  store: RunStore,
+  runId: string,
+  nonGoals: string[],
+): Promise<RunState> {
+  const normalized = [...new Set(nonGoals.map((value) => value.trim()).filter(Boolean))].slice(0, 20);
+  return await store.update(
+    runId,
+    "run.non-goals.recorded",
+    (state) => {
+      state.nonGoals = normalized;
+      return state;
+    },
+    { count: normalized.length },
+  );
+}
+
+export async function recordAgentThread(
+  store: RunStore,
+  runId: string,
+  attemptId: string,
+  threadId: string,
+): Promise<RunState> {
+  if (!/^[0-9a-f-]{36}$/i.test(threadId)) throw new Error("invalid Codex thread id");
+  return await store.update(
+    runId,
+    "agent.thread.recorded",
+    (state) => {
+      const attempt = requireAttempt(state, attemptId);
+      if (attempt.threadId && attempt.threadId !== threadId) {
+        throw new Error("agent thread id is immutable");
+      }
+      attempt.threadId = threadId;
+      attempt.status = "running";
+      return state;
+    },
+    { attemptId, threadId },
+  );
+}
+
+export async function finishAgentAttempt(
+  store: RunStore,
+  runId: string,
+  attemptId: string,
+  result: {
+    status: "complete" | "failed" | "timed-out";
+    exitCode: number;
+    failureFingerprint?: string;
+  },
+): Promise<RunState> {
+  return await store.update(
+    runId,
+    "agent.finished",
+    (state) => {
+      const attempt = requireAttempt(state, attemptId);
+      attempt.status = result.status;
+      attempt.exitCode = result.exitCode;
+      attempt.completedAt = new Date().toISOString();
+      if (result.failureFingerprint) attempt.failureFingerprint = result.failureFingerprint;
+      return state;
+    },
+    { attemptId, ...result },
+  );
+}
+
+function requireAttempt(state: RunState, attemptId: string): AgentAttempt {
+  const attempt = state.attempts.find((candidate) => candidate.id === attemptId);
+  if (!attempt) throw new Error(`unknown agent attempt: ${attemptId}`);
+  return attempt;
 }

@@ -13,6 +13,7 @@ import {
 import { applyPlan, transitionRun } from "./operations.js";
 import { syncTaskIssues } from "./github.js";
 import { commitTask, prepareTaskWorktree } from "./git.js";
+import { buildTask, planRun, reviewTask, routeLane } from "./autonomy.js";
 import { assertWithin, discoverRepo, workspaceFingerprint } from "./repo.js";
 import { RunStore } from "./store.js";
 
@@ -44,7 +45,7 @@ async function main(): Promise<void> {
       });
     case "start": {
       const goal = requiredOption(parsed, "goal");
-      const lane = (option(parsed, "lane") ?? "build") as Lane;
+      const lane = (option(parsed, "lane") ?? routeLane(goal)) as Lane;
       if (!lanes.has(lane)) throw new Error(`invalid lane: ${lane}`);
       const state = await store.create({
         goal,
@@ -57,6 +58,22 @@ async function main(): Promise<void> {
     case "status": {
       const runId = await resolveRunId(store, parsed);
       return printJson(await store.load(runId));
+    }
+    case "route": {
+      const goal = requiredOption(parsed, "goal");
+      return printJson({ lane: routeLane(goal) });
+    }
+    case "agent-plan": {
+      const runId = await resolveRunId(store, parsed);
+      return printJson(await planRun(store, await store.load(runId)));
+    }
+    case "agent-build": {
+      const runId = await resolveRunId(store, parsed);
+      return printJson(await buildTask(store, runId, requiredOption(parsed, "task")));
+    }
+    case "agent-review": {
+      const runId = await resolveRunId(store, parsed);
+      return printJson(await reviewTask(store, runId, requiredOption(parsed, "task")));
     }
     case "plan": {
       const runId = await resolveRunId(store, parsed);
@@ -165,6 +182,10 @@ function printHelp(): void {
       "  init [--repo PATH]",
       "  start --goal TEXT [--lane fast|build|deep|autonomous]",
       "  status [--run ID]",
+      "  route --goal TEXT",
+      "  agent-plan [--run ID]",
+      "  agent-build --task TASK [--run ID]",
+      "  agent-review --task TASK [--run ID]",
       "  plan --file PLAN.json [--run ID]",
       "  issues sync [--run ID]",
       "  worktree --task TASK [--run ID]",

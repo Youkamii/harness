@@ -16,6 +16,7 @@ Review the exact diff and completion evidence across these dimensions.
 - unrelated behavior changed;
 - platform-specific path, shell, newline, encoding, or permission failures;
 - concurrency races, duplicate operations, or non-idempotent resume.
+- speculative features, unrelated refactors, or external side effects outside the user request.
 
 ## Security
 
@@ -35,4 +36,3 @@ Review the exact diff and completion evidence across these dimensions.
 ## Verdict
 
 `approved` requires passing deterministic checks and no unresolved critical or high finding. Medium findings require an explicit disposition. A verbal `PASS` never substitutes for evidence.
-

@@ -30,9 +30,11 @@ export class RunStore {
                 updatedAt: now,
                 sequence: 0,
                 assumptions: [],
+                nonGoals: [],
                 tasks: [],
                 evidence: [],
                 outbox: [],
+                attempts: [],
             };
             await mkdir(this.runDir(state.id), { recursive: false, mode: 0o700 });
             await this.persist(state, "run.created", { goal: state.goal, lane: state.lane });
@@ -251,7 +253,10 @@ function validateSnapshot(state, expectedId) {
         throw new Error("unsupported state schema");
     if (state.id !== expectedId)
         throw new Error("snapshot run id mismatch");
-    if (!Array.isArray(state.tasks) || !Array.isArray(state.evidence) || !Array.isArray(state.outbox)) {
+    if (!Array.isArray(state.tasks) ||
+        !Array.isArray(state.evidence) ||
+        !Array.isArray(state.outbox) ||
+        !Array.isArray(state.attempts)) {
         throw new Error("invalid snapshot arrays");
     }
 }

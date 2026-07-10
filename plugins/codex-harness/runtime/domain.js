@@ -35,6 +35,7 @@ export function assertRunTransition(from, to) {
 export function currentConfigHash(state) {
     const normalized = {
         lane: state.lane,
+        nonGoals: state.nonGoals,
         tasks: state.tasks.map(({ id, dependencies, acceptanceCriteria, ownedPaths, checks, risk }) => ({
             id,
             dependencies,

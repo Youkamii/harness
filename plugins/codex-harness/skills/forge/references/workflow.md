@@ -51,3 +51,4 @@ Complete only when:
 
 Continue without asking when a choice is reversible and consistent with repository evidence. Ask only for missing authority, credentials, an unauthorized irreversible action, or an unresolved product fork with materially different outcomes.
 
+Automatic permission authorizes execution inside the requested outcome. It never authorizes speculative features, unrelated cleanup, deployment, cross-repository mutation, or a materially broader product decision.
