@@ -1,0 +1,4 @@
+interface:
+  display_name: "Forge"
+  short_description: "Autonomous issue-to-verified-commit execution"
+  default_prompt: "Use $forge to finish this task autonomously with issue tracking, tests, and adversarial review."

@@ -1,5 +1,8 @@
-evals/results/
-.harness/
 node_modules/
-.gstack/
-.obsidian/
+coverage/
+.harness/
+.worktrees/
+*.log
+*.tmp
+.DS_Store
+

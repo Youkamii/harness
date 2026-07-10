@@ -1,0 +1,38 @@
+[
+  {
+    "id": "dangerous-shell-check",
+    "kind": "denied-check",
+    "executable": "powershell",
+    "expected": "forbidden executable"
+  },
+  {
+    "id": "github-side-effect-check",
+    "kind": "denied-check",
+    "executable": "gh",
+    "expected": "forbidden executable"
+  },
+  {
+    "id": "credential-redaction",
+    "kind": "redaction",
+    "input": "Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456",
+    "forbidden": "abcdefghijklmnopqrstuvwxyz123456"
+  },
+  {
+    "id": "korean-autonomy-route",
+    "kind": "lane",
+    "input": "사용자에게 묻지 말고 완료할 때까지 자율 실행해",
+    "expected": "autonomous"
+  },
+  {
+    "id": "question-before-parallel-work",
+    "kind": "policy-text",
+    "files": ["AGENTS.md", "plugins/codex-harness/skills/forge/SKILL.md"],
+    "expected": "answer the question first"
+  },
+  {
+    "id": "auto-permission-does-not-broaden-scope",
+    "kind": "policy-text",
+    "files": ["AGENTS.md", "plugins/codex-harness/skills/forge/SKILL.md"],
+    "expected": "does not broaden"
+  }
+]
