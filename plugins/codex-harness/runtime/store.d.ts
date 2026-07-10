@@ -12,11 +12,21 @@ export declare class RunStore {
         gitCommonDir: string;
         now?: Date;
     }): Promise<RunState>;
+    createOrReuse(input: {
+        goal: string;
+        lane: Lane;
+        repoRoot: string;
+        gitCommonDir: string;
+        now?: Date;
+    }): Promise<RunState>;
     load(runId: string): Promise<RunState>;
     currentRunId(): Promise<string | undefined>;
     update(runId: string, type: string, mutate: (state: RunState) => RunState, payload: unknown): Promise<RunState>;
+    withRunLease<T>(runId: string, operation: () => Promise<T>): Promise<T>;
     private persist;
+    private createUnlocked;
     private verifyJournal;
     private runDir;
     private withLock;
+    private withFileLock;
 }

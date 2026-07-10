@@ -6,7 +6,8 @@ import path from "node:path";
 import test from "node:test";
 import { currentConfigHash } from "../runtime/domain.js";
 import { commitTask, prepareTaskWorktree } from "../runtime/git.js";
-import { integrateRun } from "../runtime/integration.js";
+import { assertSafeGitConfiguration } from "../runtime/git-policy.js";
+import { assertIntegrationState, integrateRun } from "../runtime/integration.js";
 import {
   addEvidence,
   applyPlan,
@@ -235,5 +236,85 @@ test("integration replays every retry commit and is idempotent", async () => {
     assert.equal(git(state.integrationWorktreePath, "log", "--format=%B", "--grep", "Harness-Task: retry-feature", "--fixed-strings").match(/Harness-Task: retry-feature/g)?.length, 2);
     const replayed = await integrateRun(store, state.id);
     assert.equal(replayed.integrationSha, state.integrationSha);
+    await writeFile(path.join(state.integrationWorktreePath, "feature.txt"), "uncommitted\n", "utf8");
+    await assert.rejects(() => assertIntegrationState(state), /uncommitted changes/);
+  });
+});
+
+test("dependent task worktree includes prerequisite commits", async () => {
+  await fixture(async (repo) => {
+    const context = await discoverRepo(repo);
+    const store = new RunStore(context.stateRoot);
+    let state = await store.create({
+      goal: "build dependency chain",
+      lane: "deep",
+      repoRoot: context.root,
+      gitCommonDir: context.gitCommonDir,
+    });
+    state = await applyPlan(store, state.id, [
+      {
+        id: "provider",
+        title: "Provider",
+        dependencies: [],
+        acceptanceCriteria: ["provider exists"],
+        ownedPaths: ["provider.txt"],
+        checks: [{ argv: ["node", "--version"] }],
+        risk: "medium",
+      },
+      {
+        id: "consumer",
+        title: "Consumer",
+        dependencies: ["provider"],
+        acceptanceCriteria: ["consumer sees provider"],
+        ownedPaths: ["consumer.txt"],
+        checks: [{ argv: ["node", "--version"] }],
+        risk: "medium",
+      },
+    ]);
+    for (const [taskId, number] of [["provider", 10], ["consumer", 11]]) {
+      state = await setTaskIssue(store, state.id, taskId, {
+        number,
+        url: `https://github.com/example/repo/issues/${number}`,
+        marker: `<!-- ${taskId} -->`,
+        syncedAt: new Date().toISOString(),
+        state: "open",
+      });
+    }
+    state = await transitionRun(store, state.id, "issue_sync");
+    state = await transitionRun(store, state.id, "executing");
+    state = await prepareTaskWorktree(store, state.id, "provider");
+    await writeFile(path.join(state.tasks[0].worktreePath, "provider.txt"), "provider-api\n", "utf8");
+    state = await setTaskStatus(store, state.id, "provider", "verifying");
+    let treeHash = await workspaceFingerprint(state.tasks[0].worktreePath);
+    state = await addEvidence(store, state.id, {
+      kind: "verification",
+      status: "pass",
+      treeHash,
+      configHash: currentConfigHash(state),
+      taskId: "provider",
+      command: { argv: ["node", "--version"] },
+      exitCode: 0,
+    });
+    state = await commitTask(store, state.id, "provider", "feat: provider");
+    state = await setTaskStatus(store, state.id, "provider", "reviewed");
+    state = await setTaskStatus(store, state.id, "provider", "complete");
+
+    state = await prepareTaskWorktree(store, state.id, "consumer");
+    const consumer = state.tasks.find((task) => task.id === "consumer");
+    const provider = state.tasks.find((task) => task.id === "provider");
+    assert.equal((await (await import("node:fs/promises")).readFile(path.join(consumer.worktreePath, "provider.txt"), "utf8")).replaceAll("\r\n", "\n"), "provider-api\n");
+    assert.notEqual(consumer.baseSha, state.baseSha);
+    assert.ok(provider.commitSha);
+  });
+});
+
+test("controller rejects external Git filter drivers", async () => {
+  await fixture(async (repo) => {
+    git(repo, "config", "filter.exfil.clean", "node steal-secrets.js");
+    await writeFile(path.join(repo, ".gitattributes"), "*.secret filter=exfil\n", "utf8");
+    await assert.rejects(
+      () => assertSafeGitConfiguration(repo, ["payload.secret"]),
+      /external Git clean\/smudge\/process filters/,
+    );
   });
 });

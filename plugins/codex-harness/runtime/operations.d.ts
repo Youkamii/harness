@@ -13,6 +13,7 @@ export declare function setTaskWorktree(store: RunStore, runId: string, taskId: 
     worktreePath: string;
     baseSha: string;
 }): Promise<RunState>;
+export declare function clearTaskWorktree(store: RunStore, runId: string, taskId: string): Promise<RunState>;
 export declare function recordTaskCommit(store: RunStore, runId: string, taskId: string, commitSha: string, evidence: Omit<EvidenceRecord, "id" | "recordedAt">): Promise<RunState>;
 export declare function beginEffect(store: RunStore, runId: string, input: Pick<ExternalEffect, "key" | "kind">): Promise<{
     state: RunState;
@@ -25,6 +26,11 @@ export declare function startAgentAttempt(store: RunStore, runId: string, input:
 export declare function recordAssumptions(store: RunStore, runId: string, assumptions: string[]): Promise<RunState>;
 export declare function recordNonGoals(store: RunStore, runId: string, nonGoals: string[]): Promise<RunState>;
 export declare function resetTaskForRetry(store: RunStore, runId: string, taskId: string, reason: string): Promise<RunState>;
+export declare function recordRunBase(store: RunStore, runId: string, baseSha: string): Promise<RunState>;
+export declare function reopenTaskForRemediation(store: RunStore, runId: string, taskId: string, reason: string): Promise<RunState>;
+export declare function beginRemediation(store: RunStore, runId: string, taskId: string, reason: string): Promise<RunState>;
+export declare function completeRemediation(store: RunStore, runId: string): Promise<RunState>;
+export declare function clearIntegration(store: RunStore, runId: string): Promise<RunState>;
 export declare function recordIntegration(store: RunStore, runId: string, integration: {
     branch: string;
     worktreePath: string;

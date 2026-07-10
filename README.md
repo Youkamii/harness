@@ -1,19 +1,179 @@
 # Codex Harness
 
-A Codex-native personal harness for autonomous issue-to-verified-commit execution. It combines an installable Codex plugin with a deterministic local control plane for durable goals, task DAGs, GitHub issues, evidence gates, resumable execution, and adversarial multi-agent review.
+한 줄로 말하면, **“기능을 만들어줘”라는 요청을 받은 Codex가 계획·이슈·코드·테스트·커밋·적대적 리뷰까지 스스로 끝내되, 증거 없이는 완료했다고 말하지 못하게 하는 개인용 실행 하네스**입니다.
 
-## Status
+단순 프롬프트 모음이 아닙니다. Codex 플러그인과 `$forge` 스킬이 사용자의 의도를 이해하고, TypeScript 컨트롤러가 Git·GitHub·상태·재시도·완료 판정을 강제합니다. 모델은 생각하고 코드를 쓰지만 자기 작업을 스스로 합격시키거나 권한을 넓힐 수 없습니다.
 
-Active development. The repository was rebuilt for Codex on 2026-07-11; the previous Claude-oriented implementation remains available in Git history.
+## 이 하네스가 해결하는 문제
 
-## Development
+코딩 에이전트를 오래 실행하면 흔히 다음 문제가 생깁니다.
 
-```bash
-npm install
-npm run build
-npm test
-npm run validate
+- 사소한 선택까지 계속 사용자에게 묻는다.
+- 요청하지 않은 리팩터링이나 기능까지 넘겨짚어 범위를 넓힌다.
+- “테스트했다”, “완료했다”는 말은 하지만 실제 증거가 없다.
+- 여러 에이전트가 같은 파일을 고치거나 같은 이슈를 중복 생성한다.
+- 중간에 프로세스가 죽으면 어디까지 했는지 잃어버린다.
+- 기능별로는 맞아도 합친 뒤 깨지는 문제를 놓친다.
+- 작업 에이전트와 리뷰 에이전트가 같은 결론을 공유해 서로의 실수를 강화한다.
+
+이 저장소는 이 문제를 프롬프트가 아니라 작업트리 격리, 해시 원장, 상태 머신, 권한 분리, 실제 명령 결과, 두 개의 독립 리뷰와 최종 통합 게이트로 다룹니다.
+
+## 요청 하나가 처리되는 실제 순서
+
+예를 들어 다음과 같이 요청했다고 가정합니다.
+
+```text
+$forge 로그인 재시도 기능을 구현해. 공개 API는 유지하고 배포는 하지 마.
 ```
 
-The plugin is under `plugins/codex-harness`. Installation and workflow documentation is expanded as the implementation issues land.
+하네스는 내부에서 다음 순서로 움직입니다.
 
+1. **범위를 고정합니다.** 저장소의 `AGENTS.md`, 코드, 테스트와 기존 관례를 읽습니다. “공개 API 변경”, “배포”, “관련 없는 정리”를 비목표로 기록합니다.
+2. **작업 DAG를 만듭니다.** 기능을 독립적으로 검증할 수 있는 작업으로 나누고, 선행 작업·소유 파일·수락 기준·실행할 검사 명령을 정합니다. 검사 없는 작업이나 겹치는 소유 경로는 거부됩니다.
+3. **GitHub 이슈를 만듭니다.** 기능 작업마다 안정적인 실행 마커가 있는 이슈를 만들거나 기존 이슈를 재사용합니다. 모델이 저장소에서 읽은 문장은 원격 이슈에 그대로 게시하지 않습니다.
+4. **격리 작업트리를 만듭니다.** 작업마다 `forge/<issue>-<task>` 브랜치와 별도 Git worktree를 만듭니다. 자식 작업은 선언된 부모 작업의 커밋을 실제로 포함한 상태에서 시작합니다.
+5. **Codex 작업자를 실행합니다.** 작업자는 `workspace-write`, 승인 정책 `never`, 중첩 플러그인·앱·브라우저·멀티에이전트 비활성 상태로 자기 소유 경로만 수정합니다. 실패 후 재시도할 때는 정확한 Codex thread ID와 검증된 실패 이유를 사용합니다.
+6. **기계 검증을 실행합니다.** 컨트롤러가 자격증명과 네트워크를 제거한 Codex OS 샌드박스에서 계획된 명령을 다시 실행합니다. 검사가 종료 코드 0을 내더라도 저장소 내용을 몰래 바꾸면 실패입니다.
+7. **기능 커밋을 만듭니다.** 소유 경로만 명시적으로 스테이징하고 비밀정보 패턴을 검사합니다. 커밋에는 이슈 번호, 실행 ID, 작업 ID, 멱등 effect ID가 들어갑니다. Git 훅과 GPG 서명은 컨트롤러 커밋 경계에서 비활성화됩니다.
+8. **두 명이 동시에 다시 봅니다.** 읽기 전용 수락 감사자는 모든 수락 기준을 증거에 연결하고, 적대적 리뷰어는 구현이 미묘하게 틀렸다고 가정해 오류 경로·회귀·보안·Windows/WSL·테스트 품질을 공격합니다. 서로의 결론은 공유하지 않습니다.
+9. **실패하면 고쳐서 반복합니다.** 기능 검증이나 리뷰가 실패하면 이유를 다음 구현 작업자에게 넘겨 최대 세 번 접근을 바꿔 재시도합니다. 통합 후 실패도 담당 작업을 다시 열고 통합 브랜치를 안전하게 재구성합니다.
+10. **전체를 다시 합쳐 검증합니다.** 기능 커밋을 의존성 순서로 `forge/run-<run-id>` 브랜치에 재생합니다. 합쳐진 현재 트리에서 모든 검사와 두 리뷰를 다시 실행합니다.
+11. **증거 게이트가 완료를 결정합니다.** 모든 작업 이슈, 기능 커밋, 필수 검사, 수락 기준, 작업별 독립 리뷰가 현재 콘텐츠 해시와 현재 계획 해시에 결합돼야 완료됩니다. `PASS`, `DONE`, README 문구나 에이전트의 자신감은 증거로 인정되지 않습니다.
+
+## 사용자와 대화하는 방식
+
+이 하네스는 자율 실행과 범위 절제를 동시에 지킵니다.
+
+- 한 메시지에 **질문과 작업 요청이 같이 있으면 질문에 먼저 답하고**, 작업은 기다리지 않고 병렬로 계속합니다.
+- 저장소와 테스트로 판단 가능한 구현 선택은 사용자에게 되묻지 않습니다.
+- 자동 권한은 요청한 결과 안에서 실행할 권한입니다. 요청하지 않은 배포, 다른 저장소 변경, 대규모 리팩터링, 새 제품 기능을 추가할 권한이 아닙니다.
+- 새 자격증명이나 권한이 실제로 없을 때, 요청되지 않은 비가역 외부 작업이 필요할 때, 서로 다른 제품 결과 중 하나를 근거로 고를 수 없을 때만 사용자 판단을 요구합니다.
+- 세 번 실패하거나 외부 조건이 해결되지 않으면 이유와 증거가 남는 `blocked` 상태가 됩니다. 조건이 바뀌면 `resume`이 마지막 단계로 돌아갑니다.
+
+## 구성 요소
+
+| 구성 요소 | 역할 |
+| --- | --- |
+| `AGENTS.md` | 저장소 전체에 적용되는 자율성, 범위, 이슈·커밋·검증 규칙 |
+| `plugins/codex-harness/skills/forge/` | 기능 구현 요청을 끝까지 수행하는 사용자 진입점 |
+| `plugins/codex-harness/skills/forge-review/` | 독립 수락 감사와 적대적 리뷰 규칙 |
+| `plugins/codex-harness/src/` | 권위 있는 TypeScript 컨트롤러 소스 |
+| `plugins/codex-harness/runtime/` | 플러그인이 바로 실행하는 컴파일된 JavaScript |
+| `.agents/plugins/marketplace.json` | 이 저장소를 Codex 로컬 마켓플레이스로 노출 |
+| `.git/codex-harness/` | 대상 저장소의 해시 연결 원장, 스냅샷, 에이전트 시도, outbox |
+| `evals/` | 범위 확장, 위험 명령, 비밀정보, 상호작용 정책 회귀 평가 |
+
+상세 설계는 [아키텍처](docs/architecture.md), 위협 경계는 [보안 모델](docs/security.md), 최근 조사 근거는 [2026-07-11 최근 30일 조사](docs/research-2026-07-11.md), 실제 통과 기록은 [릴리스 검증 증거](docs/release-evidence-2026-07-11.md)에 있습니다.
+
+## 설치
+
+필요한 도구:
+
+- Git
+- Node.js 20.11 이상
+- GitHub CLI `gh` 로그인 또는 `GH_TOKEN`/`GITHUB_TOKEN`
+- Codex CLI 0.144.1 이상 로그인 또는 지원되는 API 키 인증
+
+통합 모노레포에서 설치합니다.
+
+```bash
+git clone https://github.com/Youkamii/harness.git
+cd harness/codex-harness-2026-07-11
+npm ci
+npm run check
+npm test
+npm run validate
+npm run install:plugin
+```
+
+PowerShell에서도 같은 명령을 그대로 사용할 수 있습니다.
+
+```powershell
+git clone https://github.com/Youkamii/harness.git
+Set-Location harness\codex-harness-2026-07-11
+npm ci
+npm run doctor
+npm run install:plugin
+```
+
+설치 스크립트는 다음을 자동 확인합니다.
+
+1. 이 디렉터리의 `youkamii-harness` 마켓플레이스가 이미 다른 경로를 가리키지 않는지 확인합니다.
+2. 필요한 경우 로컬 마켓플레이스를 등록합니다.
+3. `codex-harness@youkamii-harness`를 설치 또는 갱신합니다.
+4. 플러그인이 활성화됐는지, 실제 소스 경로가 이 디렉터리인지 다시 검사합니다.
+
+설치 후에는 새 Codex 스레드를 열어야 새 스킬과 플러그인 버전이 확실히 로드됩니다.
+
+## 사용법
+
+가장 간단한 사용법은 Codex의 새 스레드에서 `$forge`를 붙여 결과를 요청하는 것입니다.
+
+```text
+$forge 결제 API에 idempotency key 지원을 추가해. 기존 클라이언트는 깨지면 안 되고 배포는 하지 마.
+```
+
+컨트롤러를 직접 실행할 때는 다음 명령을 사용합니다.
+
+```bash
+node plugins/codex-harness/skills/forge/scripts/forge.mjs doctor
+node plugins/codex-harness/skills/forge/scripts/forge.mjs auto --goal "원하는 결과"
+node plugins/codex-harness/skills/forge/scripts/forge.mjs status
+node plugins/codex-harness/skills/forge/scripts/forge.mjs resume
+```
+
+- `doctor`: Node, Git, GitHub 인증, Codex 최소 버전, 네트워크 차단 샌드박스를 검사합니다.
+- `auto`: 같은 목표의 진행 중 실행이 있으면 재사용하고, 없으면 새 실행을 만들어 완료 또는 근거 있는 차단까지 진행합니다.
+- `status`: 원장에 기록된 목표, 단계, 작업, 이슈, 커밋, 증거, 에이전트 시도를 JSON으로 보여줍니다.
+- `resume`: 죽은 잠금은 안전하게 회수하고, 차단 원인이 해결된 실행은 기록된 단계에서 다시 시작합니다.
+
+완성된 결과는 별도 통합 브랜치와 작업트리에 남습니다. 하네스는 사용자가 요청하지 않은 원격 push, 배포, 이슈 종료, 다른 저장소 수정을 자동으로 추가하지 않습니다.
+
+## 상태와 복구
+
+실행 상태는 다음 순서로 진행합니다.
+
+```text
+created → planning → issue_sync → executing → verifying → reviewing → integrating → complete
+```
+
+수정이 필요하면 `remediating`을 거쳐 `executing`으로 돌아갑니다. 모든 활성 단계는 `blocked`, `failed`, `cancelled`로 이동할 수 있습니다.
+
+원장은 각 이벤트에 이전 이벤트 해시와 전체 결과 상태를 함께 기록합니다. `snapshot.json`은 빠른 조회용일 뿐이며, 같은 sequence로 위조돼도 저널이 항상 이기고 스냅샷을 다시 씁니다. 컨트롤러가 강제 종료돼 잠금 파일이 남으면 같은 호스트의 죽은 PID인지 확인한 뒤에만 회수합니다. 살아 있는 프로세스나 다른 호스트의 잠금은 훔치지 않습니다.
+
+## 검증과 릴리스 확인
+
+```bash
+npm run doctor
+npm run check
+npm test
+npm run eval
+npm run validate
+npm run smoke:agent
+```
+
+- `npm test`: DAG 의존성, 원장 위조, 잠금 경합, 작업트리 격리, 재시도 커밋 통합, 작업별 완료 게이트, 실제 네트워크 차단, 자격증명 제거, symlink/junction 탈출, 프로세스 트리 종료 등을 검사합니다.
+- `npm run eval`: 위험한 planner 명령, 범위 확장, 질문 우선 응답, 비밀정보 필터 정책을 평가합니다.
+- `npm run validate`: 플러그인·마켓플레이스·스킬·컴파일 산출물 구조를 검사합니다.
+- `npm run smoke:agent`: 인증된 실제 Codex planner를 임시 Git 저장소에서 한 번 실행해 비대화형 호출과 구조화 출력 계약을 확인합니다. 모델 호출이므로 CI가 아니라 로컬 릴리스 검증에서 실행합니다.
+
+GitHub Actions는 Ubuntu와 Windows, Node 20.11과 22 조합에서 고정 Codex CLI를 설치하고 테스트합니다. 빌드 후 커밋된 `runtime/`이 소스와 달라졌는지도 실패로 처리합니다.
+
+## 보안 경계와 의도적인 비기능
+
+하네스는 모델 출력, 저장소 문서, 이슈, 테스트와 명령 출력을 신뢰하지 않습니다. 모든 프로세스는 문자열 셸이 아닌 argv 배열로 실행되고, leaf agent는 Git·GitHub·하네스 상태를 직접 조작할 수 없습니다. 검증 명령은 실제 경로를 확인해 symlink/junction으로 작업트리를 탈출하지 못합니다.
+
+현재 버전이 의도적으로 하지 않는 일:
+
+- 자동 force push, 자동 배포, 자동 원격 merge
+- 다른 저장소나 클라우드 인프라의 추측성 변경
+- 임의 셸 훅 실행
+- 모델의 완료 문구만으로 이슈 종료
+- leaf agent가 다시 하위 agent를 무제한 생성하는 재귀 권한 확장
+- 대시보드, 벡터 데이터베이스, tmux 같은 필수 외부 런타임 추가
+
+운영체제 또는 Codex 샌드박스 자체의 취약점은 이 저장소가 막을 수 없는 잔여 경계입니다. 또한 저장소 테스트는 임의 코드이므로 반드시 지원되는 Codex OS 샌드박스에서 실행합니다.
+
+## 개발 규칙
+
+기능은 먼저 GitHub 이슈로 정의하고 기능별 커밋으로 유지합니다. 변경 후 TypeScript 검사, 전체 테스트, 평가, 저장소 검증, 공식 플러그인 검증, 두 스킬 검증과 실제 Codex 스모크를 실행합니다. 라이선스는 MIT입니다.

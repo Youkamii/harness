@@ -6,7 +6,7 @@ import { resolveCodexExecutable } from "./executables.js";
 import { validatePlan } from "./graph.js";
 import { sha256 } from "./hash.js";
 import { finishAgentAttempt, recordAgentThread, startAgentAttempt, } from "./operations.js";
-import { redactSecrets, sanitizedEnvironment } from "./redact.js";
+import { codexControllerEnvironment, redactSecrets } from "./redact.js";
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const disabledFeatures = ["plugins", "apps", "browser_use", "computer_use", "multi_agent"];
 export async function runCodexWorker(request) {
@@ -26,6 +26,8 @@ export async function runCodexWorker(request) {
         "never",
         "-s",
         sandbox,
+        "-c",
+        "shell_environment_policy.inherit=core",
         ...disabledFeatures.flatMap((feature) => ["--disable", feature]),
         "exec",
         ...(request.resumeThreadId ? ["resume"] : []),
@@ -64,12 +66,13 @@ export async function runCodexWorker(request) {
         await finishAgentAttempt(request.store, request.runId, attempt.id, {
             status: result.timedOut ? "timed-out" : "failed",
             exitCode: result.exitCode,
-            failureFingerprint: sha256(redactSecrets(result.stderr)),
+            failureFingerprint: sha256(redactSecrets(`${result.stdout}\n${result.stderr}`)),
         });
-        throw new Error(`Codex ${request.role} ${result.timedOut ? "timed out" : `exited with ${result.exitCode}`}: ${redactSecrets(result.stderr).slice(0, 2000)}`);
+        throw new Error(`Codex ${request.role} ${result.timedOut ? "timed out" : `exited with ${result.exitCode}`}: ${redactSecrets([result.stdout, result.stderr].filter(Boolean).join("\n")).slice(0, 2000)}`);
     }
     try {
         const output = JSON.parse(await readFile(outputFile, "utf8"));
+        normalizeWorkerOutput(request.role, output);
         validateWorkerOutput(request.role, output);
         await finishAgentAttempt(request.store, request.runId, attempt.id, {
             status: "complete",
@@ -87,6 +90,29 @@ export async function runCodexWorker(request) {
     }
     finally {
         await rm(outputFile, { force: true });
+    }
+}
+function normalizeWorkerOutput(role, value) {
+    if (role !== "planner" || !value || typeof value !== "object")
+        return;
+    const tasks = value.tasks;
+    if (!Array.isArray(tasks))
+        return;
+    for (const task of tasks) {
+        if (!task || typeof task !== "object")
+            continue;
+        const checks = task.checks;
+        if (!Array.isArray(checks))
+            continue;
+        for (const check of checks) {
+            if (!check || typeof check !== "object")
+                continue;
+            const record = check;
+            for (const key of ["cwd", "timeoutMs", "required"]) {
+                if (record[key] === null)
+                    delete record[key];
+            }
+        }
     }
 }
 function schemaFor(role) {
@@ -148,13 +174,14 @@ async function spawnCodex(input) {
     return await new Promise((resolve, reject) => {
         const child = spawn(input.executable, input.args, {
             cwd: input.cwd,
-            env: sanitizedEnvironment(),
+            env: codexControllerEnvironment(),
             shell: false,
             windowsHide: true,
             detached: process.platform !== "win32",
             stdio: ["pipe", "pipe", "pipe"],
         });
         const stderrChunks = [];
+        const stdoutChunks = [];
         let stdoutBuffer = "";
         let outputBytes = 0;
         let timedOut = false;
@@ -181,6 +208,7 @@ async function spawnCodex(input) {
         child.stdout.on("data", (chunk) => {
             if (!account(chunk))
                 return;
+            stdoutChunks.push(chunk);
             stdoutBuffer += chunk.toString("utf8");
             let newline = stdoutBuffer.indexOf("\n");
             while (newline >= 0) {
@@ -204,6 +232,7 @@ async function spawnCodex(input) {
                 .then(() => finish(() => resolve({
                 exitCode: code ?? -1,
                 timedOut,
+                stdout: redactSecrets(Buffer.concat(stdoutChunks).toString("utf8")),
                 stderr: redactSecrets(Buffer.concat(stderrChunks).toString("utf8")),
             })))
                 .catch((error) => fail(error instanceof Error ? error : new Error(String(error))));
@@ -265,6 +294,8 @@ export function codexArgumentsForTest(role, cwd, schema, output) {
         "never",
         "-s",
         sandbox,
+        "-c",
+        "shell_environment_policy.inherit=core",
         ...disabledFeatures.flatMap((feature) => ["--disable", feature]),
         "exec",
         "--ignore-user-config",

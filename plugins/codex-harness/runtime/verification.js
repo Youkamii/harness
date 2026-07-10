@@ -1,11 +1,11 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import { currentConfigHash } from "./domain.js";
 import { resolveCodexExecutable } from "./executables.js";
 import { reviewTask } from "./autonomy.js";
 import { addEvidence, setTaskStatus } from "./operations.js";
 import { sanitizedEnvironment, redactSecrets } from "./redact.js";
-import { assertWithin, workspaceFingerprint } from "./repo.js";
+import { realpathWithin, workspaceFingerprint } from "./repo.js";
 import { runProcess } from "./process.js";
 export async function captureBaseline(store, runId, taskId) {
     return await runChecks(store, runId, taskId, "baseline");
@@ -17,7 +17,7 @@ export async function verifyTask(store, runId, taskId, options = {}) {
     const treeHash = await workspaceFingerprint(options.worktree ?? requireWorktree(task));
     const required = results.filter((_, index) => task.checks[index]?.required !== false);
     return {
-        passed: required.every((result) => result.exitCode === 0 && !result.timedOut),
+        passed: required.every((result) => result.exitCode === 0 && !result.timedOut && !result.mutated),
         results,
         treeHash,
     };
@@ -25,7 +25,7 @@ export async function verifyTask(store, runId, taskId, options = {}) {
 async function runChecks(store, runId, taskId, phase, options = {}) {
     let state = await store.load(runId);
     const task = requireTask(state, taskId);
-    const worktree = options.worktree ?? requireWorktree(task);
+    const worktree = await realpath(options.worktree ?? requireWorktree(task));
     if (phase === "baseline" && task.status !== "running") {
         throw new Error(`baseline requires running task, got ${task.status}`);
     }
@@ -54,9 +54,8 @@ async function runChecks(store, runId, taskId, phase, options = {}) {
     const results = [];
     const codexExecutable = await resolveCodexExecutable();
     for (const command of task.checks) {
-        const cwd = path.resolve(worktree, command.cwd ?? ".");
-        assertWithin(worktree, cwd);
-        const executable = await resolveExecutable(command.argv[0] ?? "", cwd, environment);
+        const cwd = await realpathWithin(worktree, path.resolve(worktree, command.cwd ?? "."));
+        const executable = await resolveExecutable(command.argv[0] ?? "", cwd, worktree, environment);
         const result = await runProcess({
             executable: codexExecutable,
             args: [
@@ -79,6 +78,7 @@ async function runChecks(store, runId, taskId, phase, options = {}) {
             command,
             exitCode: result.exitCode,
             timedOut: result.timedOut,
+            mutated: false,
             summary: redactSecrets([result.stdout, result.stderr].filter(Boolean).join("\n")).slice(0, 4_000),
         });
     }
@@ -98,7 +98,11 @@ async function runChecks(store, runId, taskId, phase, options = {}) {
                 : result.summary,
         });
     }
-    return results.map((result) => mutated ? { ...result, exitCode: result.exitCode === 0 ? -2 : result.exitCode } : result);
+    return results.map((result) => ({
+        ...result,
+        mutated,
+        ...(mutated && result.exitCode === 0 ? { exitCode: -2 } : {}),
+    }));
 }
 export async function reviewAndRecordTask(store, runId, taskId, options = {}) {
     const result = await reviewTask(store, runId, taskId, {
@@ -183,13 +187,12 @@ export async function recordIntegratedCommitEvidence(store, runId, worktree) {
 function hasBlockingFinding(findings) {
     return findings.some((finding) => ["critical", "high", "medium"].includes(finding.severity));
 }
-async function resolveExecutable(executable, cwd, env) {
+async function resolveExecutable(executable, cwd, worktree, env) {
     if (!executable || executable.startsWith("-"))
         throw new Error("invalid verification executable");
     if (executable.includes("/") || executable.includes("\\")) {
         const resolved = path.resolve(cwd, executable);
-        assertWithin(cwd, resolved);
-        return resolved;
+        return await realpathWithin(worktree, resolved);
     }
     const locator = process.platform === "win32" ? "where.exe" : "which";
     const located = await runProcess({

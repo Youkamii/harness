@@ -42,8 +42,10 @@ export async function transitionRun(store, runId, to, options = {}) {
                 throw new Error(`completion gate rejected: ${result.reasons.join("; ")}`);
         }
         state.status = to;
-        if (to !== "blocked")
+        if (to !== "blocked") {
             delete state.blockedReason;
+            delete state.blockedFrom;
+        }
         return state;
     }, { to });
 }
@@ -54,6 +56,7 @@ export async function blockRun(store, runId, reason) {
             state.blockedReason = boundedReason;
             return state;
         }
+        state.blockedFrom = state.status;
         assertRunTransition(state.status, "blocked");
         state.status = "blocked";
         state.blockedReason = boundedReason;
@@ -71,6 +74,8 @@ export async function setTaskStatus(store, runId, taskId, to) {
         task.status = to;
         if (to === "running")
             task.attempts += 1;
+        if (to === "complete")
+            delete task.lastFailure;
         state.tasks = refreshReadyTasks(state.tasks);
         return state;
     }, { taskId, to });
@@ -100,6 +105,16 @@ export async function setTaskWorktree(store, runId, taskId, worktree) {
         task.baseSha = worktree.baseSha;
         return state;
     }, { taskId, ...worktree });
+}
+export async function clearTaskWorktree(store, runId, taskId) {
+    return await store.update(runId, "task.worktree.cleared", (state) => {
+        const task = requireTask(state, taskId);
+        delete task.branch;
+        delete task.worktreePath;
+        delete task.baseSha;
+        delete task.commitSha;
+        return state;
+    }, { taskId });
 }
 export async function recordTaskCommit(store, runId, taskId, commitSha, evidence) {
     return await store.update(runId, "task.committed", (state) => {
@@ -192,8 +207,68 @@ export async function resetTaskForRetry(store, runId, taskId, reason) {
         }
         task.status = "ready";
         delete task.commitSha;
+        task.lastFailure = reason.trim().slice(0, 2_000);
         return state;
     }, { taskId, reason });
+}
+export async function recordRunBase(store, runId, baseSha) {
+    if (!/^[0-9a-f]{40,64}$/i.test(baseSha))
+        throw new Error("invalid run base SHA");
+    return await store.update(runId, "run.base.recorded", (state) => {
+        if (state.baseSha && state.baseSha !== baseSha)
+            throw new Error("run base SHA is immutable");
+        state.baseSha = baseSha;
+        return state;
+    }, { baseSha });
+}
+export async function reopenTaskForRemediation(store, runId, taskId, reason) {
+    return await store.update(runId, "task.remediation.prepared", (state) => {
+        const task = requireTask(state, taskId);
+        if ((task.status === "ready" || task.status === "pending") && task.lastFailure)
+            return state;
+        if (task.status !== "complete")
+            throw new Error(`task ${taskId} is not complete`);
+        const complete = new Set(state.tasks.filter((candidate) => candidate.status === "complete").map((candidate) => candidate.id));
+        complete.delete(task.id);
+        task.status = task.dependencies.every((dependency) => complete.has(dependency)) ? "ready" : "pending";
+        delete task.commitSha;
+        task.lastFailure = reason.trim().slice(0, 2_000);
+        return state;
+    }, { taskId, reason: reason.trim().slice(0, 2_000) });
+}
+export async function beginRemediation(store, runId, taskId, reason) {
+    return await store.update(runId, "run.remediation.started", (state) => {
+        if (state.status === "remediating" && state.remediation)
+            return state;
+        assertRunTransition(state.status, "remediating");
+        state.status = "remediating";
+        state.remediation = {
+            taskId,
+            reason: reason.trim().slice(0, 2_000),
+            startedAt: new Date().toISOString(),
+        };
+        return state;
+    }, { taskId, reason: reason.trim().slice(0, 2_000) });
+}
+export async function completeRemediation(store, runId) {
+    return await store.update(runId, "run.remediation.completed", (state) => {
+        if (state.status !== "remediating")
+            throw new Error("run is not remediating");
+        assertRunTransition(state.status, "executing");
+        state.status = "executing";
+        delete state.remediation;
+        delete state.blockedReason;
+        delete state.blockedFrom;
+        return state;
+    }, {});
+}
+export async function clearIntegration(store, runId) {
+    return await store.update(runId, "run.integration.cleared", (state) => {
+        delete state.integrationBranch;
+        delete state.integrationWorktreePath;
+        delete state.integrationSha;
+        return state;
+    }, {});
 }
 export async function recordIntegration(store, runId, integration) {
     return await store.update(runId, "run.integration.recorded", (state) => {

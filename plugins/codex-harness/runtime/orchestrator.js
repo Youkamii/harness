@@ -1,16 +1,32 @@
 import { currentConfigHash, evaluateCompletion } from "./domain.js";
 import { buildTask, planRun } from "./autonomy.js";
-import { commitTask, prepareTaskWorktree } from "./git.js";
+import { commitTask, discardTaskWorktree, prepareTaskWorktree } from "./git.js";
 import { syncTaskIssues } from "./github.js";
-import { integrateRun } from "./integration.js";
-import { blockRun, resetTaskForRetry, setTaskStatus, transitionRun, } from "./operations.js";
+import { assertIntegrationState, discardIntegration, integrateRun, } from "./integration.js";
+import { blockRun, beginRemediation, completeRemediation, reopenTaskForRemediation, resetTaskForRetry, setTaskStatus, transitionRun, } from "./operations.js";
 import { redactSecrets } from "./redact.js";
 import { workspaceFingerprint } from "./repo.js";
 import { captureBaseline, recordIntegratedCommitEvidence, reviewAndRecordTask, verifyTask, } from "./verification.js";
 const MAX_TASK_ATTEMPTS = 3;
 export async function runAutonomously(store, runId) {
+    return await store.withRunLease(runId, async () => await runLoop(store, runId));
+}
+export async function resumeAutonomously(store, runId) {
+    return await store.withRunLease(runId, async () => {
+        let state = await store.load(runId);
+        if (state.status === "blocked") {
+            for (const task of state.tasks.filter((candidate) => candidate.status === "blocked")) {
+                state = await resetTaskForRetry(store, runId, task.id, state.blockedReason ?? "blocked run resumed");
+            }
+            const target = resumableStatus(state);
+            state = await transitionRun(store, runId, target);
+        }
+        return await runLoop(store, runId);
+    });
+}
+async function runLoop(store, runId) {
     try {
-        while (true) {
+        run: while (true) {
             let state = await store.load(runId);
             if (isTerminal(state))
                 return state;
@@ -20,6 +36,10 @@ export async function runAutonomously(store, runId) {
             }
             if (state.status === "planning" || state.status === "issue_sync") {
                 await syncTaskIssues(store, runId, state.repoRoot);
+                continue;
+            }
+            if (state.status === "remediating") {
+                await executePendingRemediation(store, runId);
                 continue;
             }
             if (state.status === "executing") {
@@ -36,6 +56,7 @@ export async function runAutonomously(store, runId) {
                 continue;
             }
             if (state.status === "verifying") {
+                await assertIntegrationState(state);
                 const worktree = requireIntegrationWorktree(state);
                 for (const task of state.tasks) {
                     const result = await verifyTask(store, runId, task.id, {
@@ -43,13 +64,18 @@ export async function runAutonomously(store, runId) {
                         allowCompleted: true,
                     });
                     if (!result.passed) {
+                        if (await prepareIntegratedRemediation(store, runId, task, "integrated verification failed")) {
+                            continue run;
+                        }
                         return await blockRun(store, runId, `Integrated verification failed for task ${task.id}.`);
                     }
                 }
+                await assertIntegrationState(await store.load(runId));
                 await transitionRun(store, runId, "reviewing");
                 continue;
             }
             if (state.status === "reviewing") {
+                await assertIntegrationState(state);
                 const worktree = requireIntegrationWorktree(state);
                 const commitSha = state.integrationSha;
                 if (!commitSha)
@@ -61,14 +87,19 @@ export async function runAutonomously(store, runId) {
                         finalTree: true,
                     });
                     if (!review.passed) {
+                        if (await prepareIntegratedRemediation(store, runId, task, "integrated adversarial review failed")) {
+                            continue run;
+                        }
                         return await blockRun(store, runId, `Integrated adversarial review blocked task ${task.id}.`);
                     }
                 }
+                await assertIntegrationState(await store.load(runId));
                 await recordIntegratedCommitEvidence(store, runId, worktree);
                 await transitionRun(store, runId, "integrating");
                 continue;
             }
             if (state.status === "integrating") {
+                await assertIntegrationState(state);
                 const worktree = requireIntegrationWorktree(state);
                 const treeHash = await workspaceFingerprint(worktree);
                 const gate = evaluateCompletion(state, treeHash, currentConfigHash(state));
@@ -88,6 +119,58 @@ export async function runAutonomously(store, runId) {
         return await blockRun(store, runId, reason);
     }
 }
+async function prepareIntegratedRemediation(store, runId, task, reason) {
+    const state = await store.load(runId);
+    const affected = remediationTasks(state, task.id);
+    if (affected.some((candidate) => candidate.attempts >= MAX_TASK_ATTEMPTS))
+        return false;
+    await beginRemediation(store, runId, task.id, reason);
+    return true;
+}
+export async function executePendingRemediation(store, runId) {
+    const state = await store.load(runId);
+    if (state.status !== "remediating" || !state.remediation) {
+        throw new Error("remediation intent is missing");
+    }
+    const affected = remediationTasks(state, state.remediation.taskId);
+    await discardIntegration(store, runId);
+    for (const candidate of [...affected].reverse()) {
+        await discardTaskWorktree(store, runId, candidate.id);
+    }
+    for (const candidate of affected) {
+        await reopenTaskForRemediation(store, runId, candidate.id, candidate.id === state.remediation.taskId
+            ? state.remediation.reason
+            : `dependency ${state.remediation.taskId} is being remediated`);
+    }
+    return await completeRemediation(store, runId);
+}
+function remediationTasks(state, rootTaskId) {
+    const affected = new Set([rootTaskId]);
+    let changed = true;
+    while (changed) {
+        changed = false;
+        for (const task of state.tasks) {
+            if (!affected.has(task.id) && task.dependencies.some((dependency) => affected.has(dependency))) {
+                affected.add(task.id);
+                changed = true;
+            }
+        }
+    }
+    const pending = new Map(state.tasks.filter((task) => affected.has(task.id)).map((task) => [task.id, task]));
+    const result = [];
+    const emitted = new Set();
+    while (pending.size > 0) {
+        const ready = [...pending.values()].filter((candidate) => candidate.dependencies.filter((dependency) => affected.has(dependency)).every((dependency) => emitted.has(dependency)));
+        if (ready.length === 0)
+            throw new Error("remediation task graph cannot be ordered");
+        for (const candidate of ready) {
+            result.push(candidate);
+            emitted.add(candidate.id);
+            pending.delete(candidate.id);
+        }
+    }
+    return result;
+}
 async function advanceTask(store, runId, observed) {
     let state = await store.load(runId);
     let task = requireTask(state, observed.id);
@@ -104,8 +187,14 @@ async function advanceTask(store, runId, observed) {
     }
     if (task.status === "running") {
         const builderAttempts = state.attempts.filter((attempt) => attempt.taskId === task.id && attempt.role === "builder").length;
-        if (builderAttempts < task.attempts)
-            await captureBaseline(store, runId, task.id);
+        if (builderAttempts < task.attempts) {
+            const baseline = await captureBaseline(store, runId, task.id);
+            if (baseline.some((result) => result.mutated)) {
+                await discardTaskWorktree(store, runId, task.id);
+                await failAndRetry(store, runId, task.id, new Error("baseline checks mutated repository content"));
+                return;
+            }
+        }
         try {
             const build = await buildTask(store, runId, task.id);
             if (build.output.status === "blocked") {
@@ -186,5 +275,16 @@ function requireIntegrationWorktree(state) {
 }
 function isTerminal(state) {
     return ["complete", "failed", "blocked", "cancelled"].includes(state.status);
+}
+function resumableStatus(state) {
+    const previous = state.blockedFrom;
+    if (previous && !["created", "complete", "failed", "blocked", "cancelled"].includes(previous)) {
+        return previous;
+    }
+    if (state.tasks.length === 0)
+        return "planning";
+    if (state.integrationWorktreePath)
+        return "verifying";
+    return state.tasks.every((task) => task.issue?.number) ? "executing" : "issue_sync";
 }
 //# sourceMappingURL=orchestrator.js.map

@@ -1,9 +1,10 @@
 import type { CommandSpec, ReviewFinding, RunState } from "./domain.js";
 import { RunStore } from "./store.js";
-interface CheckResult {
+export interface CheckResult {
     command: CommandSpec;
     exitCode: number;
     timedOut: boolean;
+    mutated: boolean;
     summary: string;
 }
 interface VerificationOptions {

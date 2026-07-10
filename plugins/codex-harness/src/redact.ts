@@ -43,6 +43,18 @@ export function sanitizedEnvironment(source: NodeJS.ProcessEnv = process.env): N
   );
 }
 
+export function githubControllerEnvironment(
+  source: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  return restoreAllowed(sanitizedEnvironment(source), source, ["GH_TOKEN", "GITHUB_TOKEN"]);
+}
+
+export function codexControllerEnvironment(
+  source: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  return restoreAllowed(sanitizedEnvironment(source), source, ["OPENAI_API_KEY", "CODEX_API_KEY"]);
+}
+
 export function containsLikelySecret(value: string): boolean {
   return secretPatterns.some((pattern) => {
     pattern.lastIndex = 0;
@@ -50,3 +62,14 @@ export function containsLikelySecret(value: string): boolean {
   });
 }
 
+function restoreAllowed(
+  target: NodeJS.ProcessEnv,
+  source: NodeJS.ProcessEnv,
+  names: string[],
+): NodeJS.ProcessEnv {
+  const result = { ...target };
+  for (const name of names) {
+    if (source[name] !== undefined) result[name] = source[name];
+  }
+  return result;
+}

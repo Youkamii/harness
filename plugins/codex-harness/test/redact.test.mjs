@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   boundedRemoteText,
+  codexControllerEnvironment,
+  githubControllerEnvironment,
   containsLikelySecret,
   redactSecrets,
   sanitizedEnvironment,
@@ -28,8 +30,27 @@ test("sanitized environment removes credential variables", () => {
   assert.equal(output.OPENAI_API_KEY, undefined);
 });
 
+test("trusted controller calls retain only their required headless credentials", () => {
+  const source = {
+    PATH: "safe",
+    GH_TOKEN: "github-secret",
+    GITHUB_TOKEN: "github-actions-secret",
+    OPENAI_API_KEY: "openai-secret",
+    PASSWORD: "never",
+  };
+  const github = githubControllerEnvironment(source);
+  assert.equal(github.GH_TOKEN, "github-secret");
+  assert.equal(github.GITHUB_TOKEN, "github-actions-secret");
+  assert.equal(github.OPENAI_API_KEY, undefined);
+  assert.equal(github.PASSWORD, undefined);
+
+  const codex = codexControllerEnvironment(source);
+  assert.equal(codex.OPENAI_API_KEY, "openai-secret");
+  assert.equal(codex.GH_TOKEN, undefined);
+  assert.equal(codex.PASSWORD, undefined);
+});
+
 test("shell metacharacters remain inert bounded text", () => {
   const input = "feature ; | && `whoami` $(Get-ChildItem) --force";
   assert.equal(boundedRemoteText(input), input);
 });
-

@@ -168,6 +168,9 @@ function builderPrompt(state: RunState, task: HarnessTask): string {
     ...task.ownedPaths.map((ownedPath) => `- ${ownedPath}`),
     "Required checks:",
     ...task.checks.map((check) => `- ${JSON.stringify(check.argv)}`),
+    ...(task.lastFailure
+      ? ["Verified failure from the previous attempt. Fix its root cause:", task.lastFailure]
+      : []),
   ].join("\n");
 }
 

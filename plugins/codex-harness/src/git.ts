@@ -1,14 +1,17 @@
 import { mkdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { currentConfigHash, type HarnessTask, type RunState } from "./domain.js";
+import { assertSafeGitConfiguration } from "./git-policy.js";
 import {
   beginEffect,
+  clearTaskWorktree,
   completeEffect,
+  recordRunBase,
   recordTaskCommit,
   setTaskStatus,
   setTaskWorktree,
 } from "./operations.js";
-import { containsLikelySecret, boundedRemoteText } from "./redact.js";
+import { containsLikelySecret, boundedRemoteText, sanitizedEnvironment } from "./redact.js";
 import { runChecked, runProcess } from "./process.js";
 import { workspaceFingerprint } from "./repo.js";
 import { RunStore } from "./store.js";
@@ -22,7 +25,8 @@ export async function prepareTaskWorktree(
   if (state.status !== "executing") {
     throw new Error(`worktree preparation requires executing state, got ${state.status}`);
   }
-  const task = requireTask(state, taskId);
+  let task = requireTask(state, taskId);
+  await assertSafeGitConfiguration(state.repoRoot);
   if (!task.issue?.number) throw new Error(`task ${taskId} has no GitHub issue`);
   if (task.worktreePath && task.branch) {
     return task.status === "ready" ? await setTaskStatus(store, runId, taskId, "running") : state;
@@ -35,13 +39,15 @@ export async function prepareTaskWorktree(
     args: ["check-ref-format", "--branch", branch],
     cwd: state.repoRoot,
   });
-  const baseSha = (
-    await runChecked({
-      executable: "git",
-      args: ["rev-parse", "HEAD"],
-      cwd: state.repoRoot,
-    })
-  ).stdout.trim();
+  if (!state.baseSha) {
+    const discoveredBase = (
+      await runChecked({ executable: "git", args: ["rev-parse", "HEAD"], cwd: state.repoRoot })
+    ).stdout.trim();
+    state = await recordRunBase(store, runId, discoveredBase);
+    task = requireTask(state, taskId);
+  }
+  const runBaseSha = state.baseSha;
+  if (!runBaseSha) throw new Error("run base SHA is missing");
   const worktreePath = path.resolve(
     path.dirname(state.repoRoot),
     `${path.basename(state.repoRoot)}.codex-harness-worktrees`,
@@ -49,6 +55,7 @@ export async function prepareTaskWorktree(
     task.id,
   );
   await mkdir(path.dirname(worktreePath), { recursive: true });
+  const hooks = await hooklessDirectory(store);
 
   const exists = await pathExists(worktreePath);
   if (!exists) {
@@ -59,9 +66,15 @@ export async function prepareTaskWorktree(
     });
     const args =
       branchExists.exitCode === 0
-        ? ["worktree", "add", worktreePath, branch]
-        : ["worktree", "add", "-b", branch, worktreePath, baseSha];
-    await runChecked({ executable: "git", args, cwd: state.repoRoot, timeoutMs: 60_000 });
+        ? ["-c", `core.hooksPath=${hooks}`, "worktree", "add", worktreePath, branch]
+        : ["-c", `core.hooksPath=${hooks}`, "worktree", "add", "-b", branch, worktreePath, runBaseSha];
+    await runChecked({
+      executable: "git",
+      args,
+      cwd: state.repoRoot,
+      env: sanitizedEnvironment(),
+      timeoutMs: 60_000,
+    });
   } else {
     await runChecked({
       executable: "git",
@@ -80,7 +93,34 @@ export async function prepareTaskWorktree(
     }
   }
 
-  state = await setTaskWorktree(store, runId, taskId, { branch, worktreePath, baseSha });
+  await recoverInterruptedCherryPick(store, worktreePath);
+  for (const dependency of dependencyClosure(state, task)) {
+    for (const commit of await taskCommits(state.repoRoot, dependency)) {
+      const effectId = await effectForCommit(state.repoRoot, commit, dependency.id);
+      if (await commitForEffect(worktreePath, runBaseSha, effectId)) continue;
+      const result = await runProcess({
+        executable: "git",
+        args: ["-c", `core.hooksPath=${hooks}`, "-c", "commit.gpgSign=false", "cherry-pick", commit],
+        cwd: worktreePath,
+        env: sanitizedEnvironment(),
+        timeoutMs: 120_000,
+        maxOutputBytes: 4 * 1024 * 1024,
+      });
+      if (result.exitCode !== 0) {
+        await runProcess({
+          executable: "git",
+          args: ["-c", `core.hooksPath=${hooks}`, "cherry-pick", "--abort"],
+          cwd: worktreePath,
+          env: sanitizedEnvironment(),
+        });
+        throw new Error(`dependency integration conflict for ${taskId}/${dependency.id}`);
+      }
+    }
+  }
+  const taskBaseSha = (
+    await runChecked({ executable: "git", args: ["rev-parse", "HEAD"], cwd: worktreePath })
+  ).stdout.trim();
+  state = await setTaskWorktree(store, runId, taskId, { branch, worktreePath, baseSha: taskBaseSha });
   return await setTaskStatus(store, runId, taskId, "running");
 }
 
@@ -92,6 +132,7 @@ export async function commitTask(
 ): Promise<RunState> {
   let state = await store.load(runId);
   let task = requireTask(state, taskId);
+  await assertSafeGitConfiguration(state.repoRoot);
   if (!task.worktreePath || !task.issue?.number) {
     throw new Error(`task ${taskId} has no prepared worktree or issue`);
   }
@@ -122,6 +163,7 @@ export async function commitTask(
   let commitSha = existing;
   if (!commitSha) {
     const changed = await changedPaths(worktreePath);
+    await assertSafeGitConfiguration(worktreePath, changed);
     const unexpected = changed.filter((candidate) => !isOwned(candidate, task.ownedPaths));
     if (unexpected.length > 0) {
       throw new Error(`task modified unowned paths: ${unexpected.join(", ")}`);
@@ -165,10 +207,12 @@ export async function commitTask(
     ].join("\n");
     await writeFile(messageFile, body, { encoding: "utf8", mode: 0o600 });
     try {
+      const hooks = await hooklessDirectory(store);
       await runChecked({
         executable: "git",
-        args: ["commit", "-F", messageFile],
+        args: ["-c", `core.hooksPath=${hooks}`, "-c", "commit.gpgSign=false", "commit", "-F", messageFile],
         cwd: worktreePath,
+        env: sanitizedEnvironment(),
         timeoutMs: 120_000,
       });
     } finally {
@@ -197,6 +241,133 @@ export async function commitTask(
     summary: `Committed ${commitSha}`,
   });
   return await completeEffect(store, runId, effect.id, { commitSha });
+}
+
+export async function discardTaskWorktree(
+  store: RunStore,
+  runId: string,
+  taskId: string,
+): Promise<RunState> {
+  const state = await store.load(runId);
+  const task = requireTask(state, taskId);
+  const issueNumber = task.issue?.number;
+  if (!issueNumber) throw new Error(`task ${taskId} has no issue`);
+  const expectedBranch = `forge/${issueNumber}-${slug(task.id)}`;
+  const expectedPath = path.resolve(
+    path.dirname(state.repoRoot),
+    `${path.basename(state.repoRoot)}.codex-harness-worktrees`,
+    runId,
+    task.id,
+  );
+  if (task.branch && task.branch !== expectedBranch) throw new Error("unexpected task branch");
+  if (task.worktreePath && path.resolve(task.worktreePath) !== expectedPath) {
+    throw new Error("unexpected task worktree path");
+  }
+  const hooks = await hooklessDirectory(store);
+  if (await pathExists(expectedPath)) {
+    await runChecked({
+      executable: "git",
+      args: ["-c", `core.hooksPath=${hooks}`, "worktree", "remove", "--force", expectedPath],
+      cwd: state.repoRoot,
+      env: sanitizedEnvironment(),
+      timeoutMs: 120_000,
+    });
+  }
+  const branchExists = await runProcess({
+    executable: "git",
+    args: ["show-ref", "--verify", "--quiet", `refs/heads/${expectedBranch}`],
+    cwd: state.repoRoot,
+    env: sanitizedEnvironment(),
+  });
+  if (branchExists.exitCode === 0) {
+    await runChecked({
+      executable: "git",
+      args: ["branch", "-D", expectedBranch],
+      cwd: state.repoRoot,
+      env: sanitizedEnvironment(),
+    });
+  }
+  return await clearTaskWorktree(store, runId, taskId);
+}
+
+function dependencyClosure(state: RunState, task: HarnessTask): HarnessTask[] {
+  const byId = new Map(state.tasks.map((candidate) => [candidate.id, candidate]));
+  const emitted = new Set<string>();
+  const result: HarnessTask[] = [];
+  const visit = (taskId: string): void => {
+    const dependency = byId.get(taskId);
+    if (!dependency) throw new Error(`missing dependency task ${taskId}`);
+    for (const nested of dependency.dependencies) visit(nested);
+    if (emitted.has(dependency.id)) return;
+    if (dependency.status !== "complete" || !dependency.commitSha || !dependency.baseSha) {
+      throw new Error(`dependency ${dependency.id} is not complete and committed`);
+    }
+    emitted.add(dependency.id);
+    result.push(dependency);
+  };
+  for (const dependency of task.dependencies) visit(dependency);
+  return result;
+}
+
+async function taskCommits(repoRoot: string, task: HarnessTask): Promise<string[]> {
+  const result = await runChecked({
+    executable: "git",
+    args: ["rev-list", "--reverse", `${task.baseSha}..${task.commitSha}`],
+    cwd: repoRoot,
+  });
+  return result.stdout.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+}
+
+async function effectForCommit(repoRoot: string, commit: string, taskId: string): Promise<string> {
+  const body = (
+    await runChecked({ executable: "git", args: ["show", "-s", "--format=%B", commit], cwd: repoRoot })
+  ).stdout;
+  if (!body.includes(`Harness-Task: ${taskId}`)) throw new Error(`dependency commit ${commit} has wrong task trailer`);
+  const effectId = body.match(/^Harness-Effect:\s*([0-9a-f-]{36})\s*$/im)?.[1];
+  if (!effectId) throw new Error(`dependency commit ${commit} lacks an effect trailer`);
+  return effectId;
+}
+
+async function commitForEffect(
+  worktreePath: string,
+  runBaseSha: string,
+  effectId: string,
+): Promise<string | undefined> {
+  const result = await runChecked({
+    executable: "git",
+    args: ["log", `${runBaseSha}..HEAD`, "--format=%H%x1f%B%x1e", "--grep", `Harness-Effect: ${effectId}`, "--fixed-strings"],
+    cwd: worktreePath,
+  });
+  for (const record of result.stdout.split("\u001e")) {
+    const [sha, body = ""] = record.split("\u001f", 2);
+    if (body.includes(`Harness-Effect: ${effectId}`) && /^[0-9a-f]{40,64}$/i.test(sha?.trim() ?? "")) {
+      return sha?.trim();
+    }
+  }
+  return undefined;
+}
+
+async function recoverInterruptedCherryPick(store: RunStore, worktreePath: string): Promise<void> {
+  const interrupted = await runProcess({
+    executable: "git",
+    args: ["rev-parse", "--verify", "--quiet", "CHERRY_PICK_HEAD"],
+    cwd: worktreePath,
+    env: sanitizedEnvironment(),
+  });
+  if (interrupted.exitCode !== 0) return;
+  const hooks = await hooklessDirectory(store);
+  await runChecked({
+    executable: "git",
+    args: ["-c", `core.hooksPath=${hooks}`, "cherry-pick", "--abort"],
+    cwd: worktreePath,
+    env: sanitizedEnvironment(),
+  });
+}
+
+async function hooklessDirectory(store: RunStore): Promise<string> {
+  const directory = path.join(store.root, "disabled-git-hooks");
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  return directory;
 }
 
 function assertTaskCommitEvidence(
@@ -257,7 +428,7 @@ async function findExistingCommit(
 async function changedPaths(worktreePath: string): Promise<string[]> {
   const result = await runChecked({
     executable: "git",
-    args: ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    args: ["-c", "core.fsmonitor=false", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
     cwd: worktreePath,
   });
   return parsePorcelainPaths(result.stdout);

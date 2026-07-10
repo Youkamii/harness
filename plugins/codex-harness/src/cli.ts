@@ -14,7 +14,8 @@ import { applyPlan, transitionRun } from "./operations.js";
 import { syncTaskIssues } from "./github.js";
 import { commitTask, prepareTaskWorktree } from "./git.js";
 import { buildTask, planRun, reviewTask, routeLane } from "./autonomy.js";
-import { runAutonomously } from "./orchestrator.js";
+import { resumeAutonomously, runAutonomously } from "./orchestrator.js";
+import { runDoctor } from "./doctor.js";
 import { assertWithin, discoverRepo, workspaceFingerprint } from "./repo.js";
 import { RunStore } from "./store.js";
 
@@ -44,6 +45,12 @@ async function main(): Promise<void> {
         gitCommonDir: repo.gitCommonDir,
         stateRoot: repo.stateRoot,
       });
+    case "doctor": {
+      const result = await runDoctor(repo.root);
+      printJson(result);
+      if (!result.passed) process.exitCode = 2;
+      return;
+    }
     case "start": {
       const goal = requiredOption(parsed, "goal");
       const lane = (option(parsed, "lane") ?? routeLane(goal)) as Lane;
@@ -60,25 +67,21 @@ async function main(): Promise<void> {
       const goal = requiredOption(parsed, "goal");
       const lane = (option(parsed, "lane") ?? routeLane(goal)) as Lane;
       if (!lanes.has(lane)) throw new Error(`invalid lane: ${lane}`);
-      const currentId = await store.currentRunId();
-      const current = currentId ? await store.load(currentId) : undefined;
-      const reusable =
-        current &&
-        current.goal === goal &&
-        current.repoRoot === repo.root &&
-        !["complete", "failed", "blocked", "cancelled"].includes(current.status)
-          ? current
-          : await store.create({
-              goal,
-              lane,
-              repoRoot: repo.root,
-              gitCommonDir: repo.gitCommonDir,
-            });
-      return printJson(await runAutonomously(store, reusable.id));
+      const reusable = await store.createOrReuse({
+        goal,
+        lane,
+        repoRoot: repo.root,
+        gitCommonDir: repo.gitCommonDir,
+      });
+      return printJson(
+        await (reusable.status === "blocked"
+          ? resumeAutonomously(store, reusable.id)
+          : runAutonomously(store, reusable.id)),
+      );
     }
     case "resume": {
       const runId = await resolveRunId(store, parsed);
-      return printJson(await runAutonomously(store, runId));
+      return printJson(await resumeAutonomously(store, runId));
     }
     case "status": {
       const runId = await resolveRunId(store, parsed);
@@ -90,15 +93,27 @@ async function main(): Promise<void> {
     }
     case "agent-plan": {
       const runId = await resolveRunId(store, parsed);
-      return printJson(await planRun(store, await store.load(runId)));
+      return printJson(
+        await store.withRunLease(runId, async () => await planRun(store, await store.load(runId))),
+      );
     }
     case "agent-build": {
       const runId = await resolveRunId(store, parsed);
-      return printJson(await buildTask(store, runId, requiredOption(parsed, "task")));
+      return printJson(
+        await store.withRunLease(
+          runId,
+          async () => await buildTask(store, runId, requiredOption(parsed, "task")),
+        ),
+      );
     }
     case "agent-review": {
       const runId = await resolveRunId(store, parsed);
-      return printJson(await reviewTask(store, runId, requiredOption(parsed, "task")));
+      return printJson(
+        await store.withRunLease(
+          runId,
+          async () => await reviewTask(store, runId, requiredOption(parsed, "task")),
+        ),
+      );
     }
     case "plan": {
       const runId = await resolveRunId(store, parsed);
@@ -106,36 +121,51 @@ async function main(): Promise<void> {
       assertWithin(repo.root, planPath);
       const value = JSON.parse(await readFile(planPath, "utf8")) as { tasks?: PlannedTask[] };
       if (!Array.isArray(value.tasks)) throw new Error("plan file must contain a tasks array");
-      return printJson(await applyPlan(store, runId, value.tasks));
+      return printJson(
+        await store.withRunLease(runId, async () => await applyPlan(store, runId, value.tasks ?? [])),
+      );
     }
     case "issues": {
       if (parsed.positionals[0] !== "sync") throw new Error("usage: issues sync [--run ID]");
       const runId = await resolveRunId(store, parsed);
-      return printJson(await syncTaskIssues(store, runId, repo.root));
+      return printJson(
+        await store.withRunLease(runId, async () => await syncTaskIssues(store, runId, repo.root)),
+      );
     }
     case "worktree": {
       const runId = await resolveRunId(store, parsed);
-      return printJson(await prepareTaskWorktree(store, runId, requiredOption(parsed, "task")));
+      return printJson(
+        await store.withRunLease(
+          runId,
+          async () => await prepareTaskWorktree(store, runId, requiredOption(parsed, "task")),
+        ),
+      );
     }
     case "commit": {
       const runId = await resolveRunId(store, parsed);
-      return printJson(
+      return printJson(await store.withRunLease(runId, async () =>
         await commitTask(
           store,
           runId,
           requiredOption(parsed, "task"),
           requiredOption(parsed, "message"),
-        ),
-      );
+        )));
     }
     case "transition": {
       const runId = await resolveRunId(store, parsed);
       const to = requiredOption(parsed, "to") as RunStatus;
       if (!RUN_STATUSES.includes(to)) throw new Error(`invalid run status: ${to}`);
-      const state = await store.load(runId);
-      const treeRoot = state.integrationWorktreePath ?? repo.root;
-      const treeHash = to === "complete" ? await workspaceFingerprint(treeRoot) : undefined;
-      return printJson(await transitionRun(store, runId, to, treeHash ? { treeHash } : {}));
+      return printJson(
+        await store.withRunLease(
+          runId,
+          async () => {
+            const state = await store.load(runId);
+            const treeRoot = state.integrationWorktreePath ?? repo.root;
+            const treeHash = to === "complete" ? await workspaceFingerprint(treeRoot) : undefined;
+            return await transitionRun(store, runId, to, treeHash ? { treeHash } : {});
+          },
+        ),
+      );
     }
     case "gate": {
       const runId = await resolveRunId(store, parsed);
@@ -207,6 +237,7 @@ function printHelp(): void {
       "",
       "Commands:",
       "  init [--repo PATH]",
+      "  doctor [--repo PATH]",
       "  start --goal TEXT [--lane fast|build|deep|autonomous]",
       "  auto --goal TEXT [--lane fast|build|deep|autonomous]",
       "  resume [--run ID]",

@@ -15,7 +15,7 @@ When one user message contains both a question and a work request, answer the qu
 
 Proceed with safe, reversible assumptions. Do not ask for preferences that can be inferred from the repository, tests, established conventions, or upstream documentation.
 
-Treat automatic permission as authority to execute the requested outcome without hand-holding, not authority to expand it. Choose the smallest complete implementation. Do not add adjacent features, broad refactors, deployments, changes to other repositories, or unrelated external actions unless explicitly requested or required by established repository policy.
+Automatic permission does not broaden scope. Treat it as authority to execute the requested outcome without hand-holding, not authority to expand it. Choose the smallest complete implementation. Do not add adjacent features, broad refactors, deployments, changes to other repositories, or unrelated external actions unless explicitly requested or required by established repository policy.
 
 Ask only when at least one condition holds:
 
@@ -29,8 +29,8 @@ Record assumptions in the run ledger. Deny an out-of-scope action instead of wea
 ## Start or resume
 
 1. Resolve the Git root and inspect nested `AGENTS.md` files.
-2. Run the bundled controller through `scripts/forge.mjs`.
-3. Resume an unfinished compatible run before creating a duplicate.
+2. Run the bundled controller through `scripts/forge.mjs` using `auto --goal` for a new outcome.
+3. Use `resume` for the current unfinished run. The `auto` command also reuses a compatible unfinished run instead of creating a duplicate.
 4. Read [workflow.md](references/workflow.md) for state transitions and gates.
 5. Read [roles.md](references/roles.md) before delegating.
 
@@ -38,8 +38,9 @@ Typical commands:
 
 ```bash
 node "<skill-directory>/scripts/forge.mjs" init
-node "<skill-directory>/scripts/forge.mjs" start --goal "<outcome>"
+node "<skill-directory>/scripts/forge.mjs" auto --goal "<outcome>"
 node "<skill-directory>/scripts/forge.mjs" status
+node "<skill-directory>/scripts/forge.mjs" resume
 ```
 
 ## Execute
@@ -48,11 +49,7 @@ node "<skill-directory>/scripts/forge.mjs" status
 2. **Create the issue.** Reuse a matching open issue carrying the run marker; otherwise create a bounded GitHub issue with goal, acceptance criteria, and task outline. Never publish secrets, raw logs, or proprietary source in the issue body.
 3. **Plan the DAG.** Split work into independently verifiable feature tasks. Assign file ownership, dependencies, checks, and completion evidence. Reject circular dependencies.
    Record explicit non-goals so autonomous execution cannot silently broaden scope.
-4. **Choose a lane.**
-   - Fast: one bounded writer and targeted verification.
-   - Build: scout, writer, verifier, and one independent reviewer.
-   - Deep: parallel read-only scouts, plan critic, isolated writers, verifier, and adversarial reviewers.
-   - Autonomous: deep lane plus durable resume and bounded retry until complete or genuinely blocked.
+4. **Choose a lane.** The controller records `fast`, `build`, `deep`, or `autonomous` as planning context based on scope, risk, and supervision intent. Every lane uses the implemented deterministic pipeline: planner, isolated builder, sandbox verification, two independent reviewers, integration, and the same completion gate. Do not promise additional roles that the controller did not launch.
 5. **Implement feature by feature.** Keep unrelated user changes intact. Prefer a dedicated worktree for each writer. The controller owns Git and GitHub mutations; workers edit only their assigned files.
 6. **Verify before committing.** Run targeted checks, inspect the diff, and bind evidence to the exact tree SHA. Commit one logical feature with the issue number and task/run trailers.
 7. **Independently review.** For non-trivial work, invoke at least two fresh reviewers with different scopes. Do not reveal the intended verdict or another reviewer's conclusions.

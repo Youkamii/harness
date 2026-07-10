@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, rm, stat, writeFile, } from "node:fs/promises";
+import { link, mkdir, open, readFile, rename, rm, stat, writeFile, } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { hashObject } from "./hash.js";
@@ -16,30 +16,20 @@ export class RunStore {
         await mkdir(this.runsRoot, { recursive: true, mode: 0o700 });
     }
     async create(input) {
+        return await this.withLock(async () => await this.createUnlocked(input));
+    }
+    async createOrReuse(input) {
         return await this.withLock(async () => {
-            const now = (input.now ?? new Date()).toISOString();
-            const state = {
-                schemaVersion: 1,
-                id: randomUUID(),
-                goal: input.goal,
-                lane: input.lane,
-                status: "created",
-                repoRoot: input.repoRoot,
-                gitCommonDir: input.gitCommonDir,
-                createdAt: now,
-                updatedAt: now,
-                sequence: 0,
-                assumptions: [],
-                nonGoals: [],
-                tasks: [],
-                evidence: [],
-                outbox: [],
-                attempts: [],
-            };
-            await mkdir(this.runDir(state.id), { recursive: false, mode: 0o700 });
-            await this.persist(state, "run.created", { goal: state.goal, lane: state.lane });
-            await atomicWriteJson(path.join(this.root, "current.json"), { runId: state.id });
-            return state;
+            const currentId = await this.currentRunId();
+            if (currentId) {
+                const current = await this.load(currentId);
+                if (current.goal === input.goal &&
+                    current.repoRoot === input.repoRoot &&
+                    !["complete", "failed", "cancelled"].includes(current.status)) {
+                    return current;
+                }
+            }
+            return await this.createUnlocked(input);
         });
     }
     async load(runId) {
@@ -51,17 +41,14 @@ export class RunStore {
             validateSnapshot(snapshot, runId);
         }
         catch (error) {
-            if (error.code !== "ENOENT" && !(error instanceof SyntaxError))
-                throw error;
+            if (error.code !== "ENOENT" && !(error instanceof SyntaxError)) {
+                snapshot = undefined;
+            }
         }
-        if (!snapshot || snapshot.sequence < journalState.sequence) {
+        if (!snapshot || hashObject(snapshot) !== hashObject(journalState)) {
             await atomicWriteJson(path.join(this.runDir(runId), "snapshot.json"), journalState);
-            return journalState;
         }
-        if (snapshot.sequence > journalState.sequence) {
-            throw new Error("snapshot is ahead of the authoritative journal");
-        }
-        return snapshot;
+        return journalState;
     }
     async currentRunId() {
         try {
@@ -87,6 +74,12 @@ export class RunStore {
             await this.persist(next, type, payload);
             return next;
         });
+    }
+    async withRunLease(runId, operation) {
+        assertRunId(runId);
+        await this.initialize();
+        await stat(this.runDir(runId));
+        return await this.withFileLock(path.join(this.runDir(runId), "orchestrator.lease"), `run ${runId}`, operation);
     }
     async persist(state, type, payload) {
         const eventPath = path.join(this.runDir(state.id), "events.jsonl");
@@ -116,6 +109,31 @@ export class RunStore {
         }
         state.sequence = sequence;
         await atomicWriteJson(path.join(this.runDir(state.id), "snapshot.json"), state);
+    }
+    async createUnlocked(input) {
+        const now = (input.now ?? new Date()).toISOString();
+        const state = {
+            schemaVersion: 1,
+            id: randomUUID(),
+            goal: input.goal,
+            lane: input.lane,
+            status: "created",
+            repoRoot: input.repoRoot,
+            gitCommonDir: input.gitCommonDir,
+            createdAt: now,
+            updatedAt: now,
+            sequence: 0,
+            assumptions: [],
+            nonGoals: [],
+            tasks: [],
+            evidence: [],
+            outbox: [],
+            attempts: [],
+        };
+        await mkdir(this.runDir(state.id), { recursive: false, mode: 0o700 });
+        await this.persist(state, "run.created", { goal: state.goal, lane: state.lane });
+        await atomicWriteJson(path.join(this.root, "current.json"), { runId: state.id });
+        return state;
     }
     async verifyJournal(runId) {
         const eventPath = path.join(this.runDir(runId), "events.jsonl");
@@ -162,37 +180,53 @@ export class RunStore {
     }
     async withLock(operation) {
         await this.initialize();
-        let handle;
+        return await this.withFileLock(this.lockPath, "harness", operation);
+    }
+    async withFileLock(lockPath, label, operation) {
         const deadline = Date.now() + 30_000;
         let waitMs = 20;
-        while (!handle) {
-            try {
-                handle = await open(this.lockPath, "wx", 0o600);
-            }
-            catch (error) {
-                if (error.code !== "EEXIST")
-                    throw error;
-                const existing = await readLock(this.lockPath);
-                if (Date.now() >= deadline) {
-                    throw new Error(`harness is locked by pid ${existing.pid} on ${existing.host}`);
-                }
-                await new Promise((resolve) => setTimeout(resolve, waitMs));
-                waitMs = Math.min(waitMs * 2, 250);
-            }
-        }
+        let existing;
         const record = {
             pid: process.pid,
             host: os.hostname(),
             acquiredAt: new Date().toISOString(),
+            ownerId: randomUUID(),
         };
+        let acquired = false;
+        while (!acquired) {
+            const reclaimPath = `${lockPath}.reclaim`;
+            if (await pathExists(reclaimPath)) {
+                await recoverAbandonedLockFile(reclaimPath);
+            }
+            if (await pathExists(reclaimPath)) {
+                if (Date.now() >= deadline)
+                    throw lockedError(label, existing);
+                await delay(waitMs);
+                waitMs = Math.min(waitMs * 2, 250);
+                continue;
+            }
+            acquired = await tryAcquireLock(lockPath, record);
+            if (acquired)
+                break;
+            existing = await readLock(lockPath);
+            if (existing && (await reclaimDeadSameHostLock(lockPath, existing)))
+                continue;
+            if (!existing && (await removeStaleInvalidLock(lockPath)))
+                continue;
+            if (Date.now() >= deadline)
+                throw lockedError(label, existing);
+            await delay(waitMs);
+            waitMs = Math.min(waitMs * 2, 250);
+        }
         try {
-            await handle.writeFile(JSON.stringify(record), "utf8");
-            await handle.sync();
+            if (await pathExists(`${lockPath}.reclaim`)) {
+                await removeOwnedLock(lockPath, record);
+                return await this.withFileLock(lockPath, label, operation);
+            }
             return await operation();
         }
         finally {
-            await handle.close();
-            await rm(this.lockPath, { force: true });
+            await removeOwnedLock(lockPath, record);
         }
     }
 }
@@ -246,11 +280,143 @@ async function lastEventHash(eventPath) {
     }
 }
 async function readLock(lockPath) {
-    const lockStat = await stat(lockPath);
-    if (Date.now() - lockStat.mtimeMs > 30 * 60 * 1_000) {
-        throw new Error("stale harness lock requires explicit recovery");
+    try {
+        const value = JSON.parse(await readFile(lockPath, "utf8"));
+        if (!Number.isSafeInteger(value.pid) ||
+            (value.pid ?? 0) <= 0 ||
+            typeof value.host !== "string" ||
+            typeof value.acquiredAt !== "string") {
+            return undefined;
+        }
+        const identity = {
+            pid: value.pid,
+            host: value.host,
+            acquiredAt: value.acquiredAt,
+        };
+        return {
+            ...identity,
+            ownerId: typeof value.ownerId === "string" && value.ownerId.length > 0
+                ? value.ownerId
+                : `legacy:${hashObject(identity)}`,
+        };
     }
-    return JSON.parse(await readFile(lockPath, "utf8"));
+    catch (error) {
+        if (error.code === "ENOENT" ||
+            error instanceof SyntaxError) {
+            return undefined;
+        }
+        throw error;
+    }
+}
+async function reclaimDeadSameHostLock(lockPath, observed) {
+    if (observed.host !== os.hostname() || isProcessAlive(observed.pid))
+        return false;
+    const reclaimPath = `${lockPath}.reclaim`;
+    const guardRecord = {
+        pid: process.pid,
+        host: os.hostname(),
+        acquiredAt: new Date().toISOString(),
+        ownerId: randomUUID(),
+    };
+    if (!(await tryAcquireLock(reclaimPath, guardRecord)))
+        return false;
+    try {
+        const current = await readLock(lockPath);
+        if (!current ||
+            current.ownerId !== observed.ownerId ||
+            current.host !== os.hostname() ||
+            isProcessAlive(current.pid)) {
+            return false;
+        }
+        await rm(lockPath, { force: true });
+        return true;
+    }
+    finally {
+        await removeOwnedLock(reclaimPath, guardRecord);
+    }
+}
+async function tryAcquireLock(lockPath, record) {
+    await mkdir(path.dirname(lockPath), { recursive: true, mode: 0o700 });
+    const candidate = `${lockPath}.${record.ownerId}.candidate`;
+    const handle = await open(candidate, "wx", 0o600);
+    try {
+        await handle.writeFile(JSON.stringify(record), "utf8");
+        await handle.sync();
+    }
+    finally {
+        await handle.close();
+    }
+    try {
+        await link(candidate, lockPath);
+        return true;
+    }
+    catch (error) {
+        if (error.code === "EEXIST")
+            return false;
+        throw error;
+    }
+    finally {
+        await rm(candidate, { force: true });
+    }
+}
+async function recoverAbandonedLockFile(lockPath) {
+    const owner = await readLock(lockPath);
+    if (owner && owner.host === os.hostname() && !isProcessAlive(owner.pid)) {
+        await removeOwnedLock(lockPath, owner);
+        return;
+    }
+    if (!owner)
+        await removeStaleInvalidLock(lockPath);
+}
+async function removeStaleInvalidLock(lockPath) {
+    let metadata;
+    try {
+        metadata = await stat(lockPath);
+    }
+    catch (error) {
+        if (error.code === "ENOENT")
+            return true;
+        throw error;
+    }
+    if (Date.now() - metadata.mtimeMs < 30 * 60 * 1_000)
+        return false;
+    if (await readLock(lockPath))
+        return false;
+    await rm(lockPath, { force: true });
+    return true;
+}
+function isProcessAlive(pid) {
+    try {
+        process.kill(pid, 0);
+        return true;
+    }
+    catch (error) {
+        return error.code !== "ESRCH";
+    }
+}
+async function removeOwnedLock(lockPath, owner) {
+    const current = await readLock(lockPath);
+    if (current?.ownerId === owner.ownerId)
+        await rm(lockPath, { force: true });
+}
+async function pathExists(target) {
+    try {
+        await stat(target);
+        return true;
+    }
+    catch (error) {
+        if (error.code === "ENOENT")
+            return false;
+        throw error;
+    }
+}
+function lockedError(label, owner) {
+    if (!owner)
+        return new Error(`${label} is locked by an unknown owner`);
+    return new Error(`${label} is locked by pid ${owner.pid} on ${owner.host}`);
+}
+async function delay(milliseconds) {
+    await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 function assertRunId(runId) {
     if (!/^[0-9a-f-]{36}$/.test(runId))

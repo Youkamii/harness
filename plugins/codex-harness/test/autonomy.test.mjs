@@ -55,6 +55,30 @@ test("planner output rejects a dangerous verification executable", () => {
   );
 });
 
+test("planner output rejects task contracts that reviewers cannot represent", () => {
+  const output = {
+    summary: "oversized",
+    assumptions: [],
+    nonGoals: [],
+    tasks: [
+      {
+        id: "oversized",
+        title: "Oversized acceptance criterion",
+        dependencies: [],
+        acceptanceCriteria: ["x".repeat(201)],
+        ownedPaths: ["src/oversized"],
+        checks: [{ argv: ["node", "--version"] }],
+        risk: "low",
+      },
+    ],
+  };
+
+  assert.throws(
+    () => validateWorkerOutputForTest("planner", output),
+    /longer than 200 characters/,
+  );
+});
+
 test("review output rejects malformed findings", () => {
   assert.throws(
     () =>

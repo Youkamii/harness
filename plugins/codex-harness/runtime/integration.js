@@ -1,20 +1,22 @@
 import { mkdir, stat } from "node:fs/promises";
 import path from "node:path";
-import { recordIntegration } from "./operations.js";
+import { assertSafeGitConfiguration } from "./git-policy.js";
+import { clearIntegration, recordIntegration } from "./operations.js";
 import { runChecked, runProcess } from "./process.js";
+import { sanitizedEnvironment } from "./redact.js";
 export async function integrateRun(store, runId) {
     let state = await store.load(runId);
-    if (state.integrationWorktreePath && state.integrationSha)
+    await assertSafeGitConfiguration(state.repoRoot);
+    if (state.integrationWorktreePath && state.integrationSha) {
+        await assertIntegrationState(state);
         return state;
+    }
     if (state.tasks.length === 0 || state.tasks.some((task) => task.status !== "complete" || !task.commitSha)) {
         throw new Error("all tasks must be complete and committed before integration");
     }
-    const bases = new Set(state.tasks.map((task) => task.baseSha));
-    if (bases.size !== 1 || bases.has(undefined))
-        throw new Error("task worktrees do not share one base SHA");
-    const baseSha = [...bases][0];
+    const baseSha = state.baseSha;
     if (!baseSha)
-        throw new Error("integration base SHA is missing");
+        throw new Error("run integration base SHA is missing");
     const branch = `forge/run-${runId.slice(0, 8)}`;
     const worktreePath = path.resolve(path.dirname(state.repoRoot), `${path.basename(state.repoRoot)}.codex-harness-integration`, runId);
     await mkdir(path.dirname(worktreePath), { recursive: true });
@@ -24,32 +26,42 @@ export async function integrateRun(store, runId) {
             args: ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`],
             cwd: state.repoRoot,
         });
+        const hooks = await hooklessDirectory(store);
         await runChecked({
             executable: "git",
             args: branchExists.exitCode === 0
-                ? ["worktree", "add", worktreePath, branch]
-                : ["worktree", "add", "-b", branch, worktreePath, baseSha],
+                ? ["-c", `core.hooksPath=${hooks}`, "worktree", "add", worktreePath, branch]
+                : ["-c", `core.hooksPath=${hooks}`, "worktree", "add", "-b", branch, worktreePath, baseSha],
             cwd: state.repoRoot,
+            env: sanitizedEnvironment(),
             timeoutMs: 60_000,
         });
     }
+    await recoverInterruptedCherryPick(store, worktreePath);
     await assertClean(worktreePath);
     const ordered = topologicalTasks(state.tasks);
     for (const task of ordered) {
-        const commits = await taskCommits(state.repoRoot, baseSha, task);
+        const commits = await taskCommits(state.repoRoot, task);
         for (const commit of commits) {
             const effectId = await effectForCommit(state.repoRoot, commit, task.id);
             if (await commitForEffect(worktreePath, baseSha, effectId))
                 continue;
+            const hooks = await hooklessDirectory(store);
             const result = await runProcess({
                 executable: "git",
-                args: ["cherry-pick", commit],
+                args: ["-c", `core.hooksPath=${hooks}`, "-c", "commit.gpgSign=false", "cherry-pick", commit],
                 cwd: worktreePath,
+                env: sanitizedEnvironment(),
                 timeoutMs: 120_000,
                 maxOutputBytes: 4 * 1024 * 1024,
             });
             if (result.exitCode !== 0) {
-                await runProcess({ executable: "git", args: ["cherry-pick", "--abort"], cwd: worktreePath });
+                await runProcess({
+                    executable: "git",
+                    args: ["-c", `core.hooksPath=${hooks}`, "cherry-pick", "--abort"],
+                    cwd: worktreePath,
+                    env: sanitizedEnvironment(),
+                });
                 throw new Error(`integration conflict for task ${task.id}: ${result.stderr.trim()}`);
             }
         }
@@ -58,6 +70,57 @@ export async function integrateRun(store, runId) {
     const sha = (await runChecked({ executable: "git", args: ["rev-parse", "HEAD"], cwd: worktreePath })).stdout.trim();
     state = await recordIntegration(store, runId, { branch, worktreePath, sha });
     return state;
+}
+export async function assertIntegrationState(state) {
+    if (!state.integrationWorktreePath || !state.integrationSha) {
+        throw new Error("integration worktree or SHA is missing");
+    }
+    await assertClean(state.integrationWorktreePath);
+    const head = (await runChecked({
+        executable: "git",
+        args: ["rev-parse", "HEAD"],
+        cwd: state.integrationWorktreePath,
+        env: sanitizedEnvironment(),
+    })).stdout.trim();
+    if (head !== state.integrationSha) {
+        throw new Error(`integration HEAD moved: expected ${state.integrationSha}, got ${head}`);
+    }
+}
+export async function discardIntegration(store, runId) {
+    const state = await store.load(runId);
+    const expectedBranch = `forge/run-${runId.slice(0, 8)}`;
+    const expectedPath = path.resolve(path.dirname(state.repoRoot), `${path.basename(state.repoRoot)}.codex-harness-integration`, runId);
+    if (state.integrationBranch && state.integrationBranch !== expectedBranch) {
+        throw new Error("refusing to remove an unexpected integration branch");
+    }
+    if (state.integrationWorktreePath && path.resolve(state.integrationWorktreePath) !== expectedPath) {
+        throw new Error("refusing to remove an unexpected integration worktree");
+    }
+    const hooks = await hooklessDirectory(store);
+    if (await pathExists(expectedPath)) {
+        await runChecked({
+            executable: "git",
+            args: ["-c", `core.hooksPath=${hooks}`, "worktree", "remove", "--force", expectedPath],
+            cwd: state.repoRoot,
+            env: sanitizedEnvironment(),
+            timeoutMs: 120_000,
+        });
+    }
+    const branchExists = await runProcess({
+        executable: "git",
+        args: ["show-ref", "--verify", "--quiet", `refs/heads/${expectedBranch}`],
+        cwd: state.repoRoot,
+        env: sanitizedEnvironment(),
+    });
+    if (branchExists.exitCode === 0) {
+        await runChecked({
+            executable: "git",
+            args: ["branch", "-D", expectedBranch],
+            cwd: state.repoRoot,
+            env: sanitizedEnvironment(),
+        });
+    }
+    return await clearIntegration(store, runId);
 }
 function topologicalTasks(tasks) {
     const pending = new Map(tasks.map((task) => [task.id, task]));
@@ -75,12 +138,12 @@ function topologicalTasks(tasks) {
     }
     return result;
 }
-async function taskCommits(repoRoot, baseSha, task) {
-    if (!task.commitSha)
-        throw new Error(`task ${task.id} has no commit SHA`);
+async function taskCommits(repoRoot, task) {
+    if (!task.commitSha || !task.baseSha)
+        throw new Error(`task ${task.id} has no commit or base SHA`);
     const result = await runChecked({
         executable: "git",
-        args: ["rev-list", "--reverse", `${baseSha}..${task.commitSha}`],
+        args: ["rev-list", "--reverse", `${task.baseSha}..${task.commitSha}`],
         cwd: repoRoot,
     });
     const commits = result.stdout.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
@@ -122,11 +185,33 @@ async function commitForEffect(worktreePath, baseSha, effectId) {
 async function assertClean(worktreePath) {
     const status = await runChecked({
         executable: "git",
-        args: ["status", "--porcelain=v1", "--untracked-files=all"],
+        args: ["-c", "core.fsmonitor=false", "status", "--porcelain=v1", "--untracked-files=all"],
         cwd: worktreePath,
     });
     if (status.stdout.trim())
         throw new Error("integration worktree contains uncommitted changes");
+}
+async function recoverInterruptedCherryPick(store, worktreePath) {
+    const interrupted = await runProcess({
+        executable: "git",
+        args: ["rev-parse", "--verify", "--quiet", "CHERRY_PICK_HEAD"],
+        cwd: worktreePath,
+        env: sanitizedEnvironment(),
+    });
+    if (interrupted.exitCode !== 0)
+        return;
+    const hooks = await hooklessDirectory(store);
+    await runChecked({
+        executable: "git",
+        args: ["-c", `core.hooksPath=${hooks}`, "cherry-pick", "--abort"],
+        cwd: worktreePath,
+        env: sanitizedEnvironment(),
+    });
+}
+async function hooklessDirectory(store) {
+    const directory = path.join(store.root, "disabled-git-hooks");
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    return directory;
 }
 async function pathExists(candidate) {
     try {

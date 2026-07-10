@@ -36,13 +36,13 @@
           "title": { "type": "string", "minLength": 1, "maxLength": 160 },
           "dependencies": {
             "type": "array",
-            "uniqueItems": true,
             "items": { "type": "string" }
           },
           "acceptanceCriteria": {
             "type": "array",
             "minItems": 1,
-            "items": { "type": "string", "minLength": 1, "maxLength": 500 }
+            "maxItems": 100,
+            "items": { "type": "string", "minLength": 1, "maxLength": 200 }
           },
           "ownedPaths": {
             "type": "array",
@@ -51,19 +51,20 @@
           },
           "checks": {
             "type": "array",
+            "minItems": 1,
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["argv"],
+              "required": ["argv", "cwd", "timeoutMs", "required"],
               "properties": {
                 "argv": {
                   "type": "array",
                   "minItems": 1,
                   "items": { "type": "string", "maxLength": 500 }
                 },
-                "cwd": { "type": "string", "maxLength": 300 },
-                "timeoutMs": { "type": "integer", "minimum": 1000, "maximum": 1800000 },
-                "required": { "type": "boolean" }
+                "cwd": { "type": ["string", "null"], "maxLength": 300 },
+                "timeoutMs": { "type": ["integer", "null"], "minimum": 1000, "maximum": 1800000 },
+                "required": { "type": ["boolean", "null"] }
               }
             }
           },

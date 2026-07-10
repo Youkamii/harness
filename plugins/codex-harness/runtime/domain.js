@@ -24,7 +24,7 @@ const transitions = {
     integrating: new Set(["complete", "remediating", "blocked", "failed", "cancelled"]),
     complete: new Set(),
     failed: new Set(["planning", "cancelled"]),
-    blocked: new Set(["planning", "issue_sync", "executing", "verifying", "reviewing", "cancelled"]),
+    blocked: new Set(["planning", "issue_sync", "executing", "verifying", "reviewing", "remediating", "integrating", "cancelled"]),
     cancelled: new Set(),
 };
 export function assertRunTransition(from, to) {
@@ -59,40 +59,40 @@ export function evaluateCompletion(state, currentTreeHash, configHash) {
         reasons.push(`tasks without synchronized GitHub issues: ${tasksWithoutIssue.map((task) => task.id).join(", ")}`);
     }
     const currentEvidence = state.evidence.filter((evidence) => evidence.treeHash === currentTreeHash && evidence.configHash === configHash);
-    if (!currentEvidence.some((evidence) => evidence.kind === "verification" && evidence.status === "pass")) {
-        reasons.push("missing passing verification for current tree");
-    }
     for (const task of state.tasks) {
+        const taskEvidence = currentEvidence.filter((evidence) => evidence.taskId === task.id);
+        if (!taskEvidence.some((evidence) => evidence.kind === "verification" && evidence.status === "pass")) {
+            reasons.push(`task lacks passing current-tree verification: ${task.id}`);
+        }
         for (const criterionId of task.acceptanceCriteria) {
-            const covered = currentEvidence.some((evidence) => evidence.kind === "acceptance" &&
+            const covered = taskEvidence.some((evidence) => evidence.kind === "acceptance" &&
                 evidence.status === "pass" &&
-                evidence.taskId === task.id &&
                 evidence.criterionId === criterionId);
             if (!covered)
                 reasons.push(`acceptance criterion lacks current evidence: ${task.id}/${criterionId}`);
         }
         for (const check of task.checks.filter((candidate) => candidate.required !== false)) {
-            const covered = currentEvidence.some((evidence) => evidence.kind === "verification" &&
+            const covered = taskEvidence.some((evidence) => evidence.kind === "verification" &&
                 evidence.status === "pass" &&
                 evidence.exitCode === 0 &&
-                evidence.taskId === task.id &&
                 evidence.command !== undefined &&
                 JSON.stringify(evidence.command.argv) === JSON.stringify(check.argv) &&
                 (evidence.command.cwd ?? "") === (check.cwd ?? ""));
             if (!covered)
                 reasons.push(`required check lacks current evidence: ${task.id}/${check.argv.join(" ")}`);
         }
-        const commitRecorded = currentEvidence.some((evidence) => evidence.kind === "commit" && evidence.status === "pass" && evidence.taskId === task.id);
+        const commitRecorded = taskEvidence.some((evidence) => evidence.kind === "commit" && evidence.status === "pass");
         if (!commitRecorded)
             reasons.push(`task lacks current commit evidence: ${task.id}`);
-    }
-    const reviews = currentEvidence.filter((evidence) => evidence.kind === "review" && evidence.status === "approved");
-    const requiredReviews = state.tasks.some((task) => task.ownedPaths.some((ownedPath) => !ownedPath.endsWith(".md")))
-        ? 2
-        : 1;
-    const distinctReviewers = new Set(reviews.map((evidence) => evidence.reviewer).filter(Boolean));
-    if (distinctReviewers.size < requiredReviews) {
-        reasons.push(`requires ${requiredReviews} independent current-tree review(s)`);
+        const requiredReviews = task.ownedPaths.some((ownedPath) => !ownedPath.endsWith(".md")) ? 2 : 1;
+        const distinctReviewers = new Set(taskEvidence
+            .filter((evidence) => evidence.kind === "review" && evidence.status === "approved")
+            .map((evidence) => evidence.reviewer)
+            .filter(Boolean));
+        if (distinctReviewers.size < requiredReviews) {
+            const reviewLabel = requiredReviews === 1 ? "review" : "reviews";
+            reasons.push(`task ${task.id} requires ${requiredReviews} independent current-tree ${reviewLabel}`);
+        }
     }
     const unresolved = currentEvidence
         .flatMap((evidence) => evidence.findings ?? [])

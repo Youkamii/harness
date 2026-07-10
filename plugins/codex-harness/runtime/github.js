@@ -1,7 +1,8 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { sha256 } from "./hash.js";
 import { beginEffect, completeEffect, setTaskIssue, transitionRun } from "./operations.js";
-import { boundedRemoteText, sanitizedEnvironment } from "./redact.js";
+import { boundedRemoteText, githubControllerEnvironment } from "./redact.js";
 import { runChecked } from "./process.js";
 export async function syncTaskIssues(store, runId, repoRoot) {
     let state = await store.load(runId);
@@ -11,7 +12,7 @@ export async function syncTaskIssues(store, runId, repoRoot) {
         throw new Error(`issue sync requires issue_sync state, got ${state.status}`);
     }
     const repo = await getRepoInfo(repoRoot);
-    const issues = await listIssues(repoRoot, repo.nameWithOwner);
+    const issues = await listIssues(repoRoot, repo.nameWithOwner, runId);
     for (const task of state.tasks) {
         if (task.issue?.number)
             continue;
@@ -46,7 +47,7 @@ async function getRepoInfo(repoRoot) {
         executable: "gh",
         args: ["repo", "view", "--json", "nameWithOwner,isPrivate,url"],
         cwd: repoRoot,
-        env: sanitizedEnvironment(),
+        env: githubControllerEnvironment(),
     });
     const value = JSON.parse(result.stdout);
     if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value.nameWithOwner)) {
@@ -54,7 +55,7 @@ async function getRepoInfo(repoRoot) {
     }
     return value;
 }
-async function listIssues(repoRoot, repository) {
+async function listIssues(repoRoot, repository, runId) {
     const result = await runChecked({
         executable: "gh",
         args: [
@@ -64,34 +65,34 @@ async function listIssues(repoRoot, repository) {
             repository,
             "--state",
             "all",
+            "--search",
+            `\"codex-harness:run=${runId}\" in:body`,
             "--limit",
-            "200",
+            "100",
             "--json",
             "number,title,body,url,state",
         ],
         cwd: repoRoot,
-        env: sanitizedEnvironment(),
+        env: githubControllerEnvironment(),
         maxOutputBytes: 4 * 1024 * 1024,
     });
     const value = JSON.parse(result.stdout);
     return Array.isArray(value) ? value : [];
 }
 async function createIssue(store, state, task, repo, marker, effectId) {
+    const ordinal = state.tasks.findIndex((candidate) => candidate.id === task.id) + 1;
     const body = [
         marker,
         "",
         "## Goal",
         boundedRemoteText(state.goal, repo.isPrivate ? 1_500 : 500),
         "",
-        "## Acceptance criteria",
-        ...task.acceptanceCriteria.map((criterion) => `- [ ] ${boundedRemoteText(criterion, 300)}`),
-        "",
-        "## Plan",
-        `- [ ] ${boundedRemoteText(task.title, 300)}`,
+        "## Local task reference",
+        `- Task ${ordinal} of ${state.tasks.length}`,
+        `- Acceptance criteria: ${task.acceptanceCriteria.length} (details remain in the local tamper-evident ledger)`,
         "",
         "## Harness metadata",
         `- Run: ${state.id}`,
-        `- Task: ${task.id}`,
         `- Lane: ${state.lane}`,
         "- Completion requires current-tree verification and independent adversarial review.",
     ].join("\n");
@@ -108,12 +109,12 @@ async function createIssue(store, state, task, repo, marker, effectId) {
                 "--repo",
                 repo.nameWithOwner,
                 "--title",
-                boundedRemoteText(task.title, 120),
+                `Harness task ${ordinal}: ${boundedRemoteText(state.goal, 80)}`,
                 "--body-file",
                 bodyFile,
             ],
             cwd: state.repoRoot,
-            env: sanitizedEnvironment(),
+            env: githubControllerEnvironment(),
         });
         const url = result.stdout.trim();
         const number = Number.parseInt(url.split("/").at(-1) ?? "", 10);
@@ -142,6 +143,7 @@ function normalizeIssue(issue, marker) {
     };
 }
 export function markerFor(runId, taskId) {
-    return `<!-- codex-harness:run=${runId};task=${taskId} -->`;
+    const opaqueTask = sha256(taskId).slice(0, 24);
+    return `<!-- codex-harness:run=${runId};task=${opaqueTask} -->`;
 }
 //# sourceMappingURL=github.js.map

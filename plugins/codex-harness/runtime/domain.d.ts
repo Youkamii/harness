@@ -25,6 +25,7 @@ export interface HarnessTask extends PlannedTask {
     worktreePath?: string;
     baseSha?: string;
     commitSha?: string;
+    lastFailure?: string;
 }
 export interface ReviewFinding {
     severity: "critical" | "high" | "medium" | "low";
@@ -98,10 +99,17 @@ export interface RunState {
     outbox: ExternalEffect[];
     attempts: AgentAttempt[];
     issue?: GitHubIssue;
+    baseSha?: string;
     integrationBranch?: string;
     integrationWorktreePath?: string;
     integrationSha?: string;
     blockedReason?: string;
+    blockedFrom?: RunStatus;
+    remediation?: {
+        taskId: string;
+        reason: string;
+        startedAt: string;
+    };
 }
 export interface JournalEvent {
     schemaVersion: 1;

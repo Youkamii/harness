@@ -31,10 +31,24 @@ export function boundedRemoteText(value, maxLength = 4_000) {
 export function sanitizedEnvironment(source = process.env) {
     return Object.fromEntries(Object.entries(source).filter(([name, value]) => value !== undefined && !sensitiveEnvironmentNames.some((pattern) => pattern.test(name))));
 }
+export function githubControllerEnvironment(source = process.env) {
+    return restoreAllowed(sanitizedEnvironment(source), source, ["GH_TOKEN", "GITHUB_TOKEN"]);
+}
+export function codexControllerEnvironment(source = process.env) {
+    return restoreAllowed(sanitizedEnvironment(source), source, ["OPENAI_API_KEY", "CODEX_API_KEY"]);
+}
 export function containsLikelySecret(value) {
     return secretPatterns.some((pattern) => {
         pattern.lastIndex = 0;
         return pattern.test(value);
     });
+}
+function restoreAllowed(target, source, names) {
+    const result = { ...target };
+    for (const name of names) {
+        if (source[name] !== undefined)
+            result[name] = source[name];
+    }
+    return result;
 }
 //# sourceMappingURL=redact.js.map

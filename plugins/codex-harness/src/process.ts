@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 
 export interface ProcessRequest {
   executable: string;
@@ -26,6 +26,7 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
       cwd: request.cwd,
       env: request.env ?? process.env,
       shell: false,
+      detached: process.platform !== "win32",
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -35,19 +36,38 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
     let outputBytes = 0;
     let timedOut = false;
     let settled = false;
+    let terminating = false;
+    let outputLimitError: Error | undefined;
+    let timeoutTimer: NodeJS.Timeout | undefined;
+    let forceKillTimer: NodeJS.Timeout | undefined;
 
-    const finish = (result: ProcessResult): void => {
+    const clearTimers = (): void => {
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      if (forceKillTimer) clearTimeout(forceKillTimer);
+    };
+
+    const finish = (result: ProcessResult, error?: Error): void => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
-      resolve(result);
+      clearTimers();
+      if (error) reject(error);
+      else resolve(result);
+    };
+
+    const terminateTree = (): void => {
+      if (terminating) return;
+      terminating = true;
+      signalProcessTree(child, "SIGTERM");
+      forceKillTimer = setTimeout(() => signalProcessTree(child, "SIGKILL"), 2_000);
+      forceKillTimer.unref();
     };
 
     const collect = (bucket: Buffer[], chunk: Buffer): void => {
+      if (terminating) return;
       outputBytes += chunk.byteLength;
       if (outputBytes > maxOutputBytes) {
-        child.kill();
-        reject(new Error(`process output exceeded ${maxOutputBytes} bytes`));
+        outputLimitError = new Error(`process output exceeded ${maxOutputBytes} bytes`);
+        terminateTree();
         return;
       }
       bucket.push(chunk);
@@ -55,26 +75,55 @@ export async function runProcess(request: ProcessRequest): Promise<ProcessResult
 
     child.stdout.on("data", (chunk: Buffer) => collect(stdout, chunk));
     child.stderr.on("data", (chunk: Buffer) => collect(stderr, chunk));
-    child.on("error", reject);
+    child.on("error", (error) => finish({
+      exitCode: -1,
+      stdout: Buffer.concat(stdout).toString("utf8"),
+      stderr: Buffer.concat(stderr).toString("utf8"),
+      timedOut,
+    }, error));
     child.on("close", (code) => {
-      finish({
+      const result = {
         exitCode: code ?? -1,
         stdout: Buffer.concat(stdout).toString("utf8"),
         stderr: Buffer.concat(stderr).toString("utf8"),
         timedOut,
-      });
+      };
+      finish(result, outputLimitError);
     });
 
+    child.stdin.on("error", () => undefined);
     if (request.input !== undefined) child.stdin.end(request.input);
     else child.stdin.end();
 
-    const timer = setTimeout(() => {
+    timeoutTimer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
-      setTimeout(() => child.kill("SIGKILL"), 2_000).unref();
+      terminateTree();
     }, timeoutMs);
-    timer.unref();
+    timeoutTimer.unref();
   });
+}
+
+function signalProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
+  const pid = child.pid;
+  if (pid === undefined) return;
+  if (process.platform === "win32") {
+    const killer = spawn("taskkill.exe", ["/PID", String(pid), "/T", "/F"], {
+      shell: false,
+      windowsHide: true,
+      stdio: "ignore",
+    });
+    killer.on("error", () => undefined);
+    return;
+  }
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    try {
+      child.kill(signal);
+    } catch {
+      // The process already exited between the close check and signal delivery.
+    }
+  }
 }
 
 export async function runChecked(request: ProcessRequest): Promise<ProcessResult> {
@@ -86,4 +135,3 @@ export async function runChecked(request: ProcessRequest): Promise<ProcessResult
   }
   return result;
 }
-

@@ -31,6 +31,17 @@ export function validatePlan(tasks: PlannedTask[]): void {
     if (task.acceptanceCriteria.length === 0) {
       throw new Error(`task ${task.id} has no acceptance criteria`);
     }
+    if (task.acceptanceCriteria.length > 100) {
+      throw new Error(`task ${task.id} exceeds the 100 acceptance criterion limit`);
+    }
+    for (const criterion of task.acceptanceCriteria) {
+      const length = [...criterion].length;
+      if (length === 0) throw new Error(`task ${task.id} has an empty acceptance criterion`);
+      if (length > 200) {
+        throw new Error(`task ${task.id} has an acceptance criterion longer than 200 characters`);
+      }
+    }
+    if (task.checks.length === 0) throw new Error(`task ${task.id} has no verification checks`);
     for (const check of task.checks) {
       if (check.argv.length === 0) throw new Error(`task ${task.id} has an empty check command`);
       if (check.argv.some((argument) => argument.includes("\u0000"))) {
