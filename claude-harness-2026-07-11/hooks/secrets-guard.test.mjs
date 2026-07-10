@@ -1,0 +1,82 @@
+// secrets-guard.mjs 회귀 테스트 — 임시 git 레포를 만들어 실제 훅 프로세스를 돌린다.
+// 실행: node hooks/secrets-guard.test.mjs
+// 주의: 테스트용 가짜 키는 자기 자신이 커밋될 때 오탐되지 않도록 문자열을 쪼개서 조립한다.
+import { spawnSync, execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const GUARD = path.join(HERE, 'secrets-guard.mjs');
+const FAKE_AWS = 'AKIA' + 'IOSFODNN7EXAMPLE'; // 조립: 소스 자체가 패턴에 안 걸리게
+const FAKE_GH = 'ghp' + '_' + 'A'.repeat(34);
+
+const run = (command, cwd) =>
+  spawnSync(process.execPath, [GUARD], {
+    input: JSON.stringify({ tool_name: 'Bash', tool_input: { command }, cwd }),
+    encoding: 'utf8',
+  });
+const git = (cwd, ...a) => execFileSync('git', a, { cwd, encoding: 'utf8' });
+const mkrepo = () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'sg-test-'));
+  git(d, 'init', '-q');
+  git(d, 'config', 'user.email', 't@t');
+  git(d, 'config', 'user.name', 't');
+  return d;
+};
+
+let fail = 0;
+const dirs = [];
+const check = (name, cond, extra) => {
+  console.log(`${cond ? 'PASS' : 'FAIL'}  ${name}${cond ? '' : '  :: ' + (extra || '')}`);
+  if (!cond) fail++;
+};
+
+// 1. 스테이징된 비밀 차단 — 파일에 공백이 있어도 스캔되어야 함 (바이너리 판별 회귀)
+const r1 = mkrepo(); dirs.push(r1);
+fs.writeFileSync(path.join(r1, 'config.py'), `aws key = "${FAKE_AWS}"\n`);
+git(r1, 'add', '.');
+let r = run('git commit -m x', r1);
+check('스테이징된 AWS 키 차단', r.status === 2, `status=${r.status}`);
+
+// 2. git commit -am 이 새로 넣은 비밀 차단 (리뷰 발견 #4)
+const r2 = mkrepo(); dirs.push(r2);
+fs.writeFileSync(path.join(r2, 'a.txt'), 'clean\n');
+git(r2, 'add', '.');
+git(r2, 'commit', '-qm', 'init');
+fs.writeFileSync(path.join(r2, 'a.txt'), `token = "${FAKE_GH}"\n`);
+r = run('git commit -am update', r2);
+check('commit -am 신규 비밀 차단', r.status === 2, `status=${r.status}`);
+
+// 3. cd 복합 명령 — 실제 대상 레포를 검사해야 함 (리뷰 발견 #5)
+const outer = mkrepo(); dirs.push(outer);
+const inner = mkrepo(); dirs.push(inner);
+fs.writeFileSync(path.join(inner, 's.txt'), `x = "${FAKE_AWS}"\n`);
+git(inner, 'add', '.');
+r = run(`cd "${inner}" && git commit -m x`, outer);
+check('cd <다른레포> && commit 차단', r.status === 2, `status=${r.status}`);
+
+// 4. 산문 속 ask-... 오탐 금지 (리뷰 발견 #7)
+const r4 = mkrepo(); dirs.push(r4);
+fs.writeFileSync(path.join(r4, 'notes.md'), 'please ask-questions-about-the-architecture-here thanks\n');
+git(r4, 'add', '.');
+r = run('git commit -m x', r4);
+check('산문 ask-... 통과', r.status === 0, `status=${r.status} stderr=${r.stderr}`);
+
+// 5. .env 파일명 자체 차단 / .env.example 허용
+const r5 = mkrepo(); dirs.push(r5);
+fs.writeFileSync(path.join(r5, '.env'), 'X=1\n');
+fs.writeFileSync(path.join(r5, '.env.example'), 'X=\n');
+git(r5, 'add', '-f', '.');
+r = run('git commit -m x', r5);
+check('.env 파일 차단', r.status === 2 && r.stderr.includes('.env') && !r.stderr.includes('.env.example'),
+  `status=${r.status}`);
+
+// 6. git 무관 명령은 무개입
+r = run('ls -la', r4);
+check('무관 명령 통과', r.status === 0 && !r.stderr, `status=${r.status}`);
+
+for (const d of dirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+console.log(fail === 0 ? '\nALL PASS' : `\n${fail} FAILURES`);
+process.exit(fail === 0 ? 0 : 1);

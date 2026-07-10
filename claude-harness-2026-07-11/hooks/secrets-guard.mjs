@@ -1,0 +1,108 @@
+#!/usr/bin/env node
+// PreToolUse 훅: git add/commit 직전에 비밀(API 키·암호·토큰)이 들어가는지 검사해 차단한다.
+//
+// 존재 이유: 에이전트가 키/암호가 든 파일을 검사 없이 커밋해버리는 사고가 실제로 있었음 (2026-06 사용자 보고).
+// 커밋된 비밀은 git 히스토리에 영구히 남고, 푸시되면 유출이다. 프롬프트(부탁)가 아니라 코드(집행)로 막는다.
+// (codex-harness-2026-07-11 에서 이식, PowerShell 툴 지원 추가)
+
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+
+const SECRET_PATTERNS = [
+  [/AKIA[0-9A-Z]{16}/, 'AWS Access Key'],
+  // 선행 경계: "ask-...", "task-..." 같은 일반 단어 오탐 방지 (리뷰 발견 #7)
+  [/(^|[^A-Za-z0-9_-])sk-ant-[A-Za-z0-9_-]{20,}/, 'Anthropic API Key'],
+  [/(^|[^A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}/, 'OpenAI류 API Key'],
+  [/\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{30,}/, 'GitHub Token'],
+  [/github_pat_[A-Za-z0-9_]{22,}/, 'GitHub Fine-grained Token'],
+  [/xox[baprs]-[A-Za-z0-9-]{10,}/, 'Slack Token'],
+  [/AIza[0-9A-Za-z_-]{35}/, 'Google API Key'],
+  [/-----BEGIN [A-Z ]*PRIVATE KEY-----/, '개인키(Private Key)'],
+  [/(password|passwd|secret|api[_-]?key|access[_-]?token)\s*[:=]\s*["'][^"'\s]{8,}["']/i, '하드코딩된 비밀값 추정'],
+];
+
+// 내용과 무관하게 커밋 자체가 금지인 파일명 (.env.example 류 템플릿은 허용)
+const FORBIDDEN_FILES = [
+  { re: /(^|\/)\.env(\.(?!example|sample|template)[\w.-]+)?$/, why: '.env 파일 (환경변수/비밀 저장소)' },
+  { re: /\.pem$/, why: '인증서/키 파일' },
+  { re: /(^|\/)id_(rsa|ed25519|ecdsa)(\.|$)/, why: 'SSH 개인키' },
+  { re: /\.(key|p12|pfx)$/, why: '키/인증서 파일' },
+];
+
+const MAX_FILES = 300;
+const MAX_BYTES = 1024 * 1024;
+
+let raw = '';
+process.stdin.on('data', (d) => (raw += d));
+process.stdin.on('end', () => {
+  let input;
+  try { input = JSON.parse(raw); } catch { process.exit(0); }
+  if (!['Bash', 'PowerShell'].includes(input.tool_name)) process.exit(0);
+  const cmd = (input.tool_input && input.tool_input.command) || '';
+  const gitIdx = cmd.search(/\bgit\b[^|;&]*\b(add|commit)\b/);
+  if (gitIdx < 0) process.exit(0);
+
+  // cd가 포함된 복합 명령이면 git이 실제로 도는 디렉터리를 추적한다 (리뷰 발견 #5)
+  let cwd = input.cwd || process.cwd();
+  const cdRe = /(?:^|&&|;)\s*cd\s+("([^"]*)"|'([^']*)'|[^\s;&|]+)/g;
+  let m, dest = null;
+  while ((m = cdRe.exec(cmd.slice(0, gitIdx))) !== null) dest = m[2] ?? m[3] ?? m[1];
+  if (dest && dest !== '-') {
+    let d = dest.replace(/^~(?=[\/\\]|$)/, os.homedir());
+    const gb = /^\/([A-Za-z])(\/|$)/.exec(d); // git-bash 드라이브 표기 /c/... → C:/...
+    if (gb) d = gb[1].toUpperCase() + ':' + d.slice(2);
+    cwd = path.resolve(cwd, d);
+  }
+
+  const git = (...args) => {
+    try { return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }); }
+    catch { return ''; }
+  };
+
+  // 검사 대상: 이미 스테이징된 파일 + (같은 명령에서 스테이징될) 변경/신규 파일
+  // git commit -a/-am/--all 도 add와 동급으로 작업 트리를 스캔한다 (리뷰 발견 #4)
+  const files = new Set(git('diff', '--cached', '--name-only').split('\n').filter(Boolean));
+  const hasAdd = /\bgit\b[^|;&]*\badd\b/.test(cmd);
+  const commitAll =
+    /\bgit\b[^|;&]*\bcommit\b/.test(cmd) && /(^|\s)(-[a-zA-Z]*a[a-zA-Z]*|--all)(\s|$)/.test(cmd);
+  if (hasAdd || commitAll) {
+    // add/commit -a 는 훅 시점엔 아직 실행 전이므로, 작업 트리의 변경·신규 파일을 함께 검사한다
+    for (const line of git('status', '--porcelain').split('\n')) {
+      const f = line.slice(3).trim().replace(/^"|"$/g, '');
+      if (f) files.add(f);
+    }
+  }
+
+  const findings = [];
+  let checked = 0;
+  for (const f of files) {
+    if (checked >= MAX_FILES) break;
+    for (const rule of FORBIDDEN_FILES) {
+      if (rule.re.test(f)) findings.push(`${f} — ${rule.why}`);
+    }
+    const p = path.join(cwd, f);
+    let st;
+    try { st = fs.statSync(p); } catch { continue; }
+    if (!st.isFile() || st.size > MAX_BYTES) continue;
+    checked += 1;
+    let content;
+    try { content = fs.readFileSync(p, 'utf8'); } catch { continue; }
+    if (content.includes('\0')) continue; // 바이너리 제외
+    for (const [re, label] of SECRET_PATTERNS) {
+      if (re.test(content)) findings.push(`${f} — ${label} 패턴 발견`);
+    }
+  }
+
+  if (findings.length) {
+    console.error(
+      `[secrets-guard] 커밋 차단 — 비밀로 보이는 내용이 포함됩니다:\n` +
+        [...new Set(findings)].map((x) => `  - ${x}`).join('\n') +
+        `\n조치: 비밀값을 .env 로 옮기고 .env 를 .gitignore 에 추가한 뒤 다시 커밋하라. ` +
+        `오탐(예시 문자열 등)이라면 해당 줄을 분리하거나 사용자에게 확인을 받아라.`
+    );
+    process.exit(2);
+  }
+  process.exit(0);
+});
