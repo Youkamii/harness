@@ -1,0 +1,42 @@
+name: Codex Harness CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "codex-harness-2026-07-11/**"
+      - ".github/workflows/codex-harness-ci.yml"
+  pull_request:
+    paths:
+      - "codex-harness-2026-07-11/**"
+      - ".github/workflows/codex-harness-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [20.11.1, 22]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: codex-harness-2026-07-11
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: codex-harness-2026-07-11/package-lock.json
+      - run: npm ci
+      - run: npm install --global @openai/codex@0.144.1
+      - run: codex --version
+      - run: npm run check
+      - run: npm test
+      - run: npm run validate
+      - run: npm run eval
+      - run: git diff --exit-code -- plugins/codex-harness/runtime
