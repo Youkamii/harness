@@ -68,9 +68,24 @@ async function nativeBinaryFromCmd(commandFile: string): Promise<string | undefi
     return undefined;
   }
   const relative = content.match(/%~dp0([^"\r\n]*codex\.exe)/i)?.[1];
-  if (!relative) return undefined;
-  const candidate = path.resolve(path.dirname(commandFile), relative.replaceAll("\\", path.sep));
-  return isCodexBinaryName(candidate) && (await isFile(candidate)) ? candidate : undefined;
+  if (relative) {
+    const candidate = path.resolve(path.dirname(commandFile), relative.replaceAll("\\", path.sep));
+    if (isCodexBinaryName(candidate) && (await isFile(candidate))) return candidate;
+  }
+  return await nativeBinaryFromNpmPrefix(path.dirname(commandFile));
+}
+
+async function nativeBinaryFromNpmPrefix(prefix: string): Promise<string | undefined> {
+  const architecture = process.arch === "arm64" ? "aarch64-pc-windows-msvc" : "x86_64-pc-windows-msvc";
+  const packageName = process.arch === "arm64" ? "codex-win32-arm64" : "codex-win32-x64";
+  const packageRoot = path.join("@openai", packageName, "vendor", architecture, "bin", "codex.exe");
+  for (const candidate of [
+    path.join(prefix, "node_modules", "@openai", "codex", "node_modules", packageRoot),
+    path.join(prefix, "node_modules", packageRoot),
+  ]) {
+    if (await isFile(candidate)) return candidate;
+  }
+  return undefined;
 }
 
 function isCodexBinaryName(candidate: string): boolean {
