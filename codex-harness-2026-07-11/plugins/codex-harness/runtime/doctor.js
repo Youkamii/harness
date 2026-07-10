@@ -1,7 +1,7 @@
 import path from "node:path";
 import { resolveCodexExecutable } from "./executables.js";
 import { runProcess } from "./process.js";
-import { githubControllerEnvironment, redactSecrets, sanitizedEnvironment } from "./redact.js";
+import { githubControllerEnvironment, offlineEnvironment, redactSecrets, sanitizedEnvironment } from "./redact.js";
 export async function runDoctor(repoRoot) {
     const checks = [];
     checks.push({
@@ -32,7 +32,7 @@ export async function runDoctor(repoRoot) {
             "--",
             process.execPath,
             "--version",
-        ], repoRoot));
+        ], repoRoot, offlineEnvironment()));
     }
     catch (error) {
         checks.push({

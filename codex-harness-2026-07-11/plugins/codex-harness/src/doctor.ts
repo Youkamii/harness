@@ -1,7 +1,7 @@
 import path from "node:path";
 import { resolveCodexExecutable } from "./executables.js";
 import { runProcess } from "./process.js";
-import { githubControllerEnvironment, redactSecrets, sanitizedEnvironment } from "./redact.js";
+import { githubControllerEnvironment, offlineEnvironment, redactSecrets, sanitizedEnvironment } from "./redact.js";
 
 export interface DoctorCheck {
   name: string;
@@ -54,6 +54,7 @@ export async function runDoctor(repoRoot: string): Promise<{ passed: boolean; ch
           "--version",
         ],
         repoRoot,
+        offlineEnvironment(),
       ),
     );
   } catch (error) {

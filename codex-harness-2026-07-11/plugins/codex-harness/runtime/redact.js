@@ -31,6 +31,9 @@ export function boundedRemoteText(value, maxLength = 4_000) {
 export function sanitizedEnvironment(source = process.env) {
     return Object.fromEntries(Object.entries(source).filter(([name, value]) => value !== undefined && !sensitiveEnvironmentNames.some((pattern) => pattern.test(name))));
 }
+export function offlineEnvironment(source = process.env) {
+    return Object.fromEntries(Object.entries(sanitizedEnvironment(source)).filter(([name]) => !/^(?:HTTP|HTTPS|ALL|NO)_PROXY$/i.test(name) && !/^NPM_CONFIG_(?:PROXY|HTTPS_PROXY)$/i.test(name)));
+}
 export function githubControllerEnvironment(source = process.env) {
     return restoreAllowed(sanitizedEnvironment(source), source, ["GH_TOKEN", "GITHUB_TOKEN"]);
 }

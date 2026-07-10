@@ -7,7 +7,7 @@
 | 검증 | 결과 |
 | --- | --- |
 | `npm run check` | 통과 — TypeScript 오류 0건 |
-| `npm test` | 통과 — 48/48, 실패 0, 건너뜀 0 |
+| `npm test` | 통과 — 50/50, 실패 0, 건너뜀 0 |
 | `npm run eval` | 통과 — 6/6 정책 사례 |
 | `npm run validate` | 통과 — 저장소·manifest·marketplace·skill 구조 |
 | `npm run doctor` | 통과 — 5/5; Node 22.17.0, Git, GitHub 인증, Codex 0.144.1, 검증 sandbox |
