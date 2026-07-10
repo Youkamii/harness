@@ -13,8 +13,9 @@ export async function prepareTaskWorktree(store, runId, taskId) {
     const task = requireTask(state, taskId);
     if (!task.issue?.number)
         throw new Error(`task ${taskId} has no GitHub issue`);
-    if (task.worktreePath && task.branch)
-        return state;
+    if (task.worktreePath && task.branch) {
+        return task.status === "ready" ? await setTaskStatus(store, runId, taskId, "running") : state;
+    }
     if (task.status !== "ready")
         throw new Error(`task ${taskId} is not ready`);
     const branch = `forge/${task.issue.number}-${slug(task.id)}`;
@@ -67,7 +68,7 @@ export async function commitTask(store, runId, taskId, message) {
         throw new Error(`task ${taskId} has no prepared worktree or issue`);
     }
     const { effect } = await beginEffect(store, runId, {
-        key: `commit:${taskId}`,
+        key: `commit:${taskId}:${task.attempts}`,
         kind: "git.commit",
     });
     state = await store.load(runId);
@@ -83,7 +84,7 @@ export async function commitTask(store, runId, taskId, message) {
         }
         return state;
     }
-    const existing = await findExistingCommit(worktreePath, runId, taskId);
+    const existing = await findExistingCommit(worktreePath, effect.id);
     const treeHash = await workspaceFingerprint(worktreePath);
     const configHash = currentConfigHash(state);
     assertTaskCommitEvidence(state, task, treeHash, configHash);
@@ -169,13 +170,6 @@ function assertTaskCommitEvidence(state, task, treeHash, configHash) {
     const evidence = state.evidence.filter((record) => record.taskId === task.id &&
         record.treeHash === treeHash &&
         record.configHash === configHash);
-    for (const criterion of task.acceptanceCriteria) {
-        if (!evidence.some((record) => record.kind === "acceptance" &&
-            record.status === "pass" &&
-            record.criterionId === criterion)) {
-            throw new Error(`missing acceptance evidence for ${task.id}/${criterion}`);
-        }
-    }
     for (const check of task.checks.filter((candidate) => candidate.required !== false)) {
         if (!evidence.some((record) => record.kind === "verification" &&
             record.status === "pass" &&
@@ -187,15 +181,22 @@ function assertTaskCommitEvidence(state, task, treeHash, configHash) {
         }
     }
 }
-async function findExistingCommit(worktreePath, runId, taskId) {
+async function findExistingCommit(worktreePath, effectId) {
     const result = await runChecked({
         executable: "git",
-        args: ["log", "--all", "--format=%H%x1f%B%x1e", "--grep", `Harness-Run: ${runId}`, "--fixed-strings"],
+        args: [
+            "log",
+            "--all",
+            "--format=%H%x1f%B%x1e",
+            "--grep",
+            `Harness-Effect: ${effectId}`,
+            "--fixed-strings",
+        ],
         cwd: worktreePath,
     });
     for (const record of result.stdout.split("\u001e")) {
         const [sha, body = ""] = record.split("\u001f", 2);
-        if (body.includes(`Harness-Task: ${taskId}`) && /^[0-9a-f]{40,64}$/.test(sha?.trim() ?? "")) {
+        if (body.includes(`Harness-Effect: ${effectId}`) && /^[0-9a-f]{40,64}$/.test(sha?.trim() ?? "")) {
             return sha?.trim();
         }
     }

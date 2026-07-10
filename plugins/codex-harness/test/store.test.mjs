@@ -98,3 +98,30 @@ test("store recovers a snapshot that lags the journal", async () => {
     assert.equal(persisted.sequence, planned.sequence);
   });
 });
+
+test("store serializes concurrent agent updates without losing events", async () => {
+  await withTempStore(async (store) => {
+    const created = await store.create({
+      goal: "parallel review",
+      lane: "deep",
+      repoRoot: "/repo",
+      gitCommonDir: "/repo/.git",
+    });
+    await Promise.all(
+      Array.from({ length: 12 }, (_, index) =>
+        store.update(
+          created.id,
+          "test.concurrent",
+          (state) => {
+            state.assumptions.push(`agent-${index}`);
+            return state;
+          },
+          { index },
+        ),
+      ),
+    );
+    const state = await store.load(created.id);
+    assert.equal(state.assumptions.length, 12);
+    assert.equal(new Set(state.assumptions).size, 12);
+  });
+});

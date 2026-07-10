@@ -103,7 +103,8 @@ export function evaluateCompletion(state, currentTreeHash, configHash) {
         reasons.push("unresolved critical or high review findings");
     const undisposedMedium = currentEvidence
         .flatMap((evidence) => evidence.findings ?? [])
-        .filter((finding) => finding.severity === "medium" && finding.disposition === undefined);
+        .filter((finding) => finding.severity === "medium" &&
+        !["fixed", "rejected", "accepted-risk"].includes(finding.disposition ?? ""));
     if (undisposedMedium.length > 0)
         reasons.push("medium review findings require dispositions");
     return { allowed: reasons.length === 0, reasons };

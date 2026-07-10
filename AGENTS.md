@@ -1,5 +1,7 @@
 # Codex Harness repository instructions
 
+When one user message contains both a question and a work request, answer the question first and continue the requested work in parallel. Do not make the user wait for the work to finish before receiving the answer.
+
 Operate autonomously. Ask the user only when work needs new authority, unavailable credentials, an irreversible external action not already requested, or a product decision with materially different outcomes. Make and record safe, reversible assumptions in every other case.
 
 Autonomous permission reduces interruptions; it does not broaden the requested outcome. Implement the smallest complete change that satisfies the request. Do not add speculative features, unrelated refactors, deployments, repository changes, or external side effects unless the user requested them or an established repository policy requires them.

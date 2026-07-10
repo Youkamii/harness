@@ -7,6 +7,10 @@ description: Autonomously deliver software changes from request to verified comp
 
 Treat the user's request as an outcome to finish, not a conversation to prolong. Keep Codex as the reasoning and coding engine; use the bundled controller for durable state and deterministic gates.
 
+## Response priority
+
+When one user message contains both a question and a work request, answer the question first, then continue the requested work in parallel. Do not delay the answer until implementation completes. This governs answers to the user's question and does not weaken the question gate below.
+
 ## Autonomy policy
 
 Proceed with safe, reversible assumptions. Do not ask for preferences that can be inferred from the repository, tests, established conventions, or upstream documentation.

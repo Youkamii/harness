@@ -190,13 +190,21 @@ export class RunStore {
 
   private async withLock<T>(operation: () => Promise<T>): Promise<T> {
     await this.initialize();
-    let handle;
-    try {
-      handle = await open(this.lockPath, "wx", 0o600);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      const existing = await readLock(this.lockPath);
-      throw new Error(`harness is locked by pid ${existing.pid} on ${existing.host}`);
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
+    const deadline = Date.now() + 30_000;
+    let waitMs = 20;
+    while (!handle) {
+      try {
+        handle = await open(this.lockPath, "wx", 0o600);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        const existing = await readLock(this.lockPath);
+        if (Date.now() >= deadline) {
+          throw new Error(`harness is locked by pid ${existing.pid} on ${existing.host}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        waitMs = Math.min(waitMs * 2, 250);
+      }
     }
     const record: LockRecord = {
       pid: process.pid,

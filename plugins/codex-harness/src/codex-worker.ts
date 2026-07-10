@@ -3,6 +3,7 @@ import { mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AgentAttempt, PlannedTask, ReviewFinding } from "./domain.js";
+import { resolveCodexExecutable } from "./executables.js";
 import { validatePlan } from "./graph.js";
 import { sha256 } from "./hash.js";
 import {
@@ -86,6 +87,7 @@ export async function runCodexWorker(request: WorkerRequest): Promise<WorkerOutp
   let result: { exitCode: number; timedOut: boolean; stderr: string };
   try {
     result = await spawnCodex({
+      executable: await resolveCodexExecutable(),
       args,
       cwd: request.cwd,
       input: request.prompt,
@@ -200,6 +202,7 @@ function validateWorkerOutput(role: AgentAttempt["role"], value: unknown): asser
 }
 
 async function spawnCodex(input: {
+  executable: string;
   args: string[];
   cwd: string;
   input: string;
@@ -207,7 +210,7 @@ async function spawnCodex(input: {
   onThreadId: (threadId: string) => Promise<void>;
 }): Promise<{ exitCode: number; timedOut: boolean; stderr: string }> {
   return await new Promise((resolve, reject) => {
-    const child = spawn("codex", input.args, {
+    const child = spawn(input.executable, input.args, {
       cwd: input.cwd,
       env: sanitizedEnvironment(),
       shell: false,

@@ -24,7 +24,9 @@ export async function prepareTaskWorktree(
   }
   const task = requireTask(state, taskId);
   if (!task.issue?.number) throw new Error(`task ${taskId} has no GitHub issue`);
-  if (task.worktreePath && task.branch) return state;
+  if (task.worktreePath && task.branch) {
+    return task.status === "ready" ? await setTaskStatus(store, runId, taskId, "running") : state;
+  }
   if (task.status !== "ready") throw new Error(`task ${taskId} is not ready`);
 
   const branch = `forge/${task.issue.number}-${slug(task.id)}`;
@@ -95,7 +97,7 @@ export async function commitTask(
   }
 
   const { effect } = await beginEffect(store, runId, {
-    key: `commit:${taskId}`,
+    key: `commit:${taskId}:${task.attempts}`,
     kind: "git.commit",
   });
   state = await store.load(runId);
@@ -112,7 +114,7 @@ export async function commitTask(
     return state;
   }
 
-  const existing = await findExistingCommit(worktreePath, runId, taskId);
+  const existing = await findExistingCommit(worktreePath, effect.id);
   const treeHash = await workspaceFingerprint(worktreePath);
   const configHash = currentConfigHash(state);
   assertTaskCommitEvidence(state, task, treeHash, configHash);
@@ -210,18 +212,6 @@ function assertTaskCommitEvidence(
       record.treeHash === treeHash &&
       record.configHash === configHash,
   );
-  for (const criterion of task.acceptanceCriteria) {
-    if (
-      !evidence.some(
-        (record) =>
-          record.kind === "acceptance" &&
-          record.status === "pass" &&
-          record.criterionId === criterion,
-      )
-    ) {
-      throw new Error(`missing acceptance evidence for ${task.id}/${criterion}`);
-    }
-  }
   for (const check of task.checks.filter((candidate) => candidate.required !== false)) {
     if (
       !evidence.some(
@@ -241,17 +231,23 @@ function assertTaskCommitEvidence(
 
 async function findExistingCommit(
   worktreePath: string,
-  runId: string,
-  taskId: string,
+  effectId: string,
 ): Promise<string | undefined> {
   const result = await runChecked({
     executable: "git",
-    args: ["log", "--all", "--format=%H%x1f%B%x1e", "--grep", `Harness-Run: ${runId}`, "--fixed-strings"],
+    args: [
+      "log",
+      "--all",
+      "--format=%H%x1f%B%x1e",
+      "--grep",
+      `Harness-Effect: ${effectId}`,
+      "--fixed-strings",
+    ],
     cwd: worktreePath,
   });
   for (const record of result.stdout.split("\u001e")) {
     const [sha, body = ""] = record.split("\u001f", 2);
-    if (body.includes(`Harness-Task: ${taskId}`) && /^[0-9a-f]{40,64}$/.test(sha?.trim() ?? "")) {
+    if (body.includes(`Harness-Effect: ${effectId}`) && /^[0-9a-f]{40,64}$/.test(sha?.trim() ?? "")) {
       return sha?.trim();
     }
   }

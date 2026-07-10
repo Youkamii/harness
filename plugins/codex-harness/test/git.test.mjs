@@ -6,9 +6,11 @@ import path from "node:path";
 import test from "node:test";
 import { currentConfigHash } from "../runtime/domain.js";
 import { commitTask, prepareTaskWorktree } from "../runtime/git.js";
+import { integrateRun } from "../runtime/integration.js";
 import {
   addEvidence,
   applyPlan,
+  resetTaskForRetry,
   setTaskIssue,
   setTaskStatus,
   transitionRun,
@@ -172,3 +174,66 @@ test("commit refuses changes outside task ownership", async () => {
   });
 });
 
+test("integration replays every retry commit and is idempotent", async () => {
+  await fixture(async (repo) => {
+    const context = await discoverRepo(repo);
+    const store = new RunStore(context.stateRoot);
+    let state = await store.create({
+      goal: "integrate fixes",
+      lane: "deep",
+      repoRoot: context.root,
+      gitCommonDir: context.gitCommonDir,
+    });
+    state = await applyPlan(store, state.id, [{
+      id: "retry-feature",
+      title: "Retry feature",
+      dependencies: [],
+      acceptanceCriteria: ["AC1"],
+      ownedPaths: ["feature.txt"],
+      checks: [{ argv: ["node", "--version"] }],
+      risk: "medium",
+    }]);
+    state = await setTaskIssue(store, state.id, "retry-feature", {
+      number: 9,
+      url: "https://github.com/example/repo/issues/9",
+      marker: "<!-- marker -->",
+      syncedAt: new Date().toISOString(),
+      state: "open",
+    });
+    state = await transitionRun(store, state.id, "issue_sync");
+    state = await transitionRun(store, state.id, "executing");
+    state = await prepareTaskWorktree(store, state.id, "retry-feature");
+
+    const recordVerification = async () => {
+      state = await setTaskStatus(store, state.id, "retry-feature", "verifying");
+      const current = state.tasks[0];
+      const treeHash = await workspaceFingerprint(current.worktreePath);
+      state = await addEvidence(store, state.id, {
+        kind: "verification",
+        status: "pass",
+        treeHash,
+        configHash: currentConfigHash(state),
+        taskId: "retry-feature",
+        command: { argv: ["node", "--version"] },
+        exitCode: 0,
+      });
+      state = await commitTask(store, state.id, "retry-feature", "feat: retry feature");
+    };
+
+    await writeFile(path.join(state.tasks[0].worktreePath, "feature.txt"), "first\n", "utf8");
+    await recordVerification();
+    state = await setTaskStatus(store, state.id, "retry-feature", "failed");
+    state = await resetTaskForRetry(store, state.id, "retry-feature", "review found a defect");
+    state = await prepareTaskWorktree(store, state.id, "retry-feature");
+    await writeFile(path.join(state.tasks[0].worktreePath, "feature.txt"), "first\nsecond\n", "utf8");
+    await recordVerification();
+    state = await setTaskStatus(store, state.id, "retry-feature", "reviewed");
+    state = await setTaskStatus(store, state.id, "retry-feature", "complete");
+
+    state = await integrateRun(store, state.id);
+    assert.equal((await (await import("node:fs/promises")).readFile(path.join(state.integrationWorktreePath, "feature.txt"), "utf8")).replaceAll("\r\n", "\n"), "first\nsecond\n");
+    assert.equal(git(state.integrationWorktreePath, "log", "--format=%B", "--grep", "Harness-Task: retry-feature", "--fixed-strings").match(/Harness-Task: retry-feature/g)?.length, 2);
+    const replayed = await integrateRun(store, state.id);
+    assert.equal(replayed.integrationSha, state.integrationSha);
+  });
+});

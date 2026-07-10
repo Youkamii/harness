@@ -4,6 +4,7 @@ export declare function applyPlan(store: RunStore, runId: string, tasks: Planned
 export declare function transitionRun(store: RunStore, runId: string, to: RunStatus, options?: {
     treeHash?: string;
 }): Promise<RunState>;
+export declare function blockRun(store: RunStore, runId: string, reason: string): Promise<RunState>;
 export declare function setTaskStatus(store: RunStore, runId: string, taskId: string, to: TaskStatus): Promise<RunState>;
 export declare function addEvidence(store: RunStore, runId: string, evidence: Omit<EvidenceRecord, "id" | "recordedAt">): Promise<RunState>;
 export declare function setTaskIssue(store: RunStore, runId: string, taskId: string, issue: GitHubIssue): Promise<RunState>;
@@ -23,6 +24,12 @@ export declare function startAgentAttempt(store: RunStore, runId: string, input:
 }): Promise<AgentAttempt>;
 export declare function recordAssumptions(store: RunStore, runId: string, assumptions: string[]): Promise<RunState>;
 export declare function recordNonGoals(store: RunStore, runId: string, nonGoals: string[]): Promise<RunState>;
+export declare function resetTaskForRetry(store: RunStore, runId: string, taskId: string, reason: string): Promise<RunState>;
+export declare function recordIntegration(store: RunStore, runId: string, integration: {
+    branch: string;
+    worktreePath: string;
+    sha: string;
+}): Promise<RunState>;
 export declare function recordAgentThread(store: RunStore, runId: string, attemptId: string, threadId: string): Promise<RunState>;
 export declare function finishAgentAttempt(store: RunStore, runId: string, attemptId: string, result: {
     status: "complete" | "failed" | "timed-out";

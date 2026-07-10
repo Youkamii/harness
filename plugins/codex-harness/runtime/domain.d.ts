@@ -98,6 +98,9 @@ export interface RunState {
     outbox: ExternalEffect[];
     attempts: AgentAttempt[];
     issue?: GitHubIssue;
+    integrationBranch?: string;
+    integrationWorktreePath?: string;
+    integrationSha?: string;
     blockedReason?: string;
 }
 export interface JournalEvent {

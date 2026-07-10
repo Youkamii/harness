@@ -7,7 +7,11 @@ export declare function buildTask(store: RunStore, runId: string, taskId: string
     state: RunState;
     output: BuilderOutput;
 }>;
-export declare function reviewTask(store: RunStore, runId: string, taskId: string): Promise<{
+export declare function reviewTask(store: RunStore, runId: string, taskId: string, options?: {
+    cwd?: string;
+    commitSha?: string;
+    allowCompleted?: boolean;
+}): Promise<{
     acceptance: ReviewOutput;
     adversarial: ReviewOutput;
     treeHash: string;

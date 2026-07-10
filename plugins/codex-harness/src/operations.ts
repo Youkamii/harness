@@ -74,6 +74,25 @@ export async function transitionRun(
   );
 }
 
+export async function blockRun(store: RunStore, runId: string, reason: string): Promise<RunState> {
+  const boundedReason = reason.trim().slice(0, 2_000) || "Run is blocked without a recorded reason.";
+  return await store.update(
+    runId,
+    "run.blocked",
+    (state) => {
+      if (state.status === "blocked") {
+        state.blockedReason = boundedReason;
+        return state;
+      }
+      assertRunTransition(state.status, "blocked");
+      state.status = "blocked";
+      state.blockedReason = boundedReason;
+      return state;
+    },
+    { reason: boundedReason },
+  );
+}
+
 export async function setTaskStatus(
   store: RunStore,
   runId: string,
@@ -297,6 +316,46 @@ export async function recordNonGoals(
       return state;
     },
     { count: normalized.length },
+  );
+}
+
+export async function resetTaskForRetry(
+  store: RunStore,
+  runId: string,
+  taskId: string,
+  reason: string,
+): Promise<RunState> {
+  return await store.update(
+    runId,
+    "task.retry.prepared",
+    (state) => {
+      const task = requireTask(state, taskId);
+      if (task.status !== "failed" && task.status !== "blocked") {
+        throw new Error(`task ${taskId} cannot retry from ${task.status}`);
+      }
+      task.status = "ready";
+      delete task.commitSha;
+      return state;
+    },
+    { taskId, reason },
+  );
+}
+
+export async function recordIntegration(
+  store: RunStore,
+  runId: string,
+  integration: { branch: string; worktreePath: string; sha: string },
+): Promise<RunState> {
+  return await store.update(
+    runId,
+    "run.integration.recorded",
+    (state) => {
+      state.integrationBranch = integration.branch;
+      state.integrationWorktreePath = integration.worktreePath;
+      state.integrationSha = integration.sha;
+      return state;
+    },
+    integration,
   );
 }
 

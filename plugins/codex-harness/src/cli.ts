@@ -14,6 +14,7 @@ import { applyPlan, transitionRun } from "./operations.js";
 import { syncTaskIssues } from "./github.js";
 import { commitTask, prepareTaskWorktree } from "./git.js";
 import { buildTask, planRun, reviewTask, routeLane } from "./autonomy.js";
+import { runAutonomously } from "./orchestrator.js";
 import { assertWithin, discoverRepo, workspaceFingerprint } from "./repo.js";
 import { RunStore } from "./store.js";
 
@@ -54,6 +55,30 @@ async function main(): Promise<void> {
         gitCommonDir: repo.gitCommonDir,
       });
       return printJson(state);
+    }
+    case "auto": {
+      const goal = requiredOption(parsed, "goal");
+      const lane = (option(parsed, "lane") ?? routeLane(goal)) as Lane;
+      if (!lanes.has(lane)) throw new Error(`invalid lane: ${lane}`);
+      const currentId = await store.currentRunId();
+      const current = currentId ? await store.load(currentId) : undefined;
+      const reusable =
+        current &&
+        current.goal === goal &&
+        current.repoRoot === repo.root &&
+        !["complete", "failed", "blocked", "cancelled"].includes(current.status)
+          ? current
+          : await store.create({
+              goal,
+              lane,
+              repoRoot: repo.root,
+              gitCommonDir: repo.gitCommonDir,
+            });
+      return printJson(await runAutonomously(store, reusable.id));
+    }
+    case "resume": {
+      const runId = await resolveRunId(store, parsed);
+      return printJson(await runAutonomously(store, runId));
     }
     case "status": {
       const runId = await resolveRunId(store, parsed);
@@ -107,13 +132,15 @@ async function main(): Promise<void> {
       const runId = await resolveRunId(store, parsed);
       const to = requiredOption(parsed, "to") as RunStatus;
       if (!RUN_STATUSES.includes(to)) throw new Error(`invalid run status: ${to}`);
-      const treeHash = to === "complete" ? await workspaceFingerprint(repo.root) : undefined;
+      const state = await store.load(runId);
+      const treeRoot = state.integrationWorktreePath ?? repo.root;
+      const treeHash = to === "complete" ? await workspaceFingerprint(treeRoot) : undefined;
       return printJson(await transitionRun(store, runId, to, treeHash ? { treeHash } : {}));
     }
     case "gate": {
       const runId = await resolveRunId(store, parsed);
       const state = await store.load(runId);
-      const treeHash = await workspaceFingerprint(repo.root);
+      const treeHash = await workspaceFingerprint(state.integrationWorktreePath ?? repo.root);
       const result = evaluateCompletion(state, treeHash, currentConfigHash(state));
       printJson({ ...result, runId, treeHash });
       if (!result.allowed) process.exitCode = 2;
@@ -181,6 +208,8 @@ function printHelp(): void {
       "Commands:",
       "  init [--repo PATH]",
       "  start --goal TEXT [--lane fast|build|deep|autonomous]",
+      "  auto --goal TEXT [--lane fast|build|deep|autonomous]",
+      "  resume [--run ID]",
       "  status [--run ID]",
       "  route --goal TEXT",
       "  agent-plan [--run ID]",

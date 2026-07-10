@@ -2,6 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveCodexExecutable } from "./executables.js";
 import { validatePlan } from "./graph.js";
 import { sha256 } from "./hash.js";
 import { finishAgentAttempt, recordAgentThread, startAgentAttempt, } from "./operations.js";
@@ -41,6 +42,7 @@ export async function runCodexWorker(request) {
     let result;
     try {
         result = await spawnCodex({
+            executable: await resolveCodexExecutable(),
             args,
             cwd: request.cwd,
             input: request.prompt,
@@ -144,7 +146,7 @@ function validateWorkerOutput(role, value) {
 }
 async function spawnCodex(input) {
     return await new Promise((resolve, reject) => {
-        const child = spawn("codex", input.args, {
+        const child = spawn(input.executable, input.args, {
             cwd: input.cwd,
             env: sanitizedEnvironment(),
             shell: false,

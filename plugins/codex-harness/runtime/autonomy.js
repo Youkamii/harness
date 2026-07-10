@@ -62,32 +62,35 @@ export async function buildTask(store, runId, taskId) {
     }
     return { state, output };
 }
-export async function reviewTask(store, runId, taskId) {
+export async function reviewTask(store, runId, taskId, options = {}) {
     const state = await store.load(runId);
     const task = requireTask(state, taskId);
-    if (task.status !== "committed" || !task.worktreePath || !task.commitSha) {
+    const allowedStatus = task.status === "committed" || (options.allowCompleted && task.status === "complete");
+    const cwd = options.cwd ?? task.worktreePath;
+    const commitSha = options.commitSha ?? task.commitSha;
+    if (!allowedStatus || !cwd || !commitSha) {
         throw new Error(`task ${taskId} must be committed before review`);
     }
-    const before = await workspaceFingerprint(task.worktreePath);
+    const before = await workspaceFingerprint(cwd);
     const [acceptance, adversarial] = await Promise.all([
         runCodexWorker({
             store,
             runId,
             role: "acceptance-auditor",
-            cwd: task.worktreePath,
-            prompt: reviewPrompt(state, task, "acceptance"),
+            cwd,
+            prompt: reviewPrompt(state, task, "acceptance", commitSha),
             taskId,
         }),
         runCodexWorker({
             store,
             runId,
             role: "adversarial-reviewer",
-            cwd: task.worktreePath,
-            prompt: reviewPrompt(state, task, "adversarial"),
+            cwd,
+            prompt: reviewPrompt(state, task, "adversarial", commitSha),
             taskId,
         }),
     ]);
-    const after = await workspaceFingerprint(task.worktreePath);
+    const after = await workspaceFingerprint(cwd);
     if (before !== after)
         throw new Error("a read-only reviewer changed the worktree");
     return { acceptance, adversarial, treeHash: after };
@@ -134,7 +137,7 @@ function builderPrompt(state, task) {
         ...task.checks.map((check) => `- ${JSON.stringify(check.argv)}`),
     ].join("\n");
 }
-function reviewPrompt(state, task, mode) {
+function reviewPrompt(state, task, mode, commitSha) {
     const objective = mode === "acceptance"
         ? "Build an acceptance-criterion-to-evidence matrix and independently verify the implementation."
         : "Assume the implementation is subtly wrong and attack correctness, regression, error paths, state, concurrency, security, compatibility, Windows/WSL behavior, and test quality.";
@@ -150,8 +153,8 @@ function reviewPrompt(state, task, mode) {
         state.goal,
         "</goal>",
         `Task: ${task.id} - ${task.title}`,
-        `Commit: ${task.commitSha}`,
-        "Acceptance criteria:",
+        `Commit or integrated tree: ${commitSha}`,
+        "Acceptance criteria (copy each full criterion verbatim into criteria[].id):",
         ...task.acceptanceCriteria.map((criterion) => `- ${criterion}`),
         "Explicit non-goals:",
         ...state.nonGoals.map((nonGoal) => `- ${nonGoal}`),
