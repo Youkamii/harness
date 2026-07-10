@@ -21,6 +21,10 @@ export interface HarnessTask extends PlannedTask {
     status: TaskStatus;
     attempts: number;
     issue?: GitHubIssue;
+    branch?: string;
+    worktreePath?: string;
+    baseSha?: string;
+    commitSha?: string;
 }
 export interface ReviewFinding {
     severity: "critical" | "high" | "medium" | "low";
@@ -54,6 +58,15 @@ export interface GitHubIssue {
     syncedAt: string;
     state: "open" | "closed";
 }
+export interface ExternalEffect {
+    id: string;
+    key: string;
+    kind: "github.issue.create" | "github.issue.comment" | "github.issue.close" | "git.commit";
+    status: "pending" | "complete" | "failed";
+    createdAt: string;
+    completedAt?: string;
+    result?: Record<string, unknown>;
+}
 export interface RunState {
     schemaVersion: 1;
     id: string;
@@ -68,6 +81,7 @@ export interface RunState {
     assumptions: string[];
     tasks: HarnessTask[];
     evidence: EvidenceRecord[];
+    outbox: ExternalEffect[];
     issue?: GitHubIssue;
     blockedReason?: string;
 }

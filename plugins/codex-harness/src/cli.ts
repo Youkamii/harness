@@ -11,6 +11,8 @@ import {
   type RunStatus,
 } from "./domain.js";
 import { applyPlan, transitionRun } from "./operations.js";
+import { syncTaskIssues } from "./github.js";
+import { commitTask, prepareTaskWorktree } from "./git.js";
 import { assertWithin, discoverRepo, workspaceFingerprint } from "./repo.js";
 import { RunStore } from "./store.js";
 
@@ -63,6 +65,26 @@ async function main(): Promise<void> {
       const value = JSON.parse(await readFile(planPath, "utf8")) as { tasks?: PlannedTask[] };
       if (!Array.isArray(value.tasks)) throw new Error("plan file must contain a tasks array");
       return printJson(await applyPlan(store, runId, value.tasks));
+    }
+    case "issues": {
+      if (parsed.positionals[0] !== "sync") throw new Error("usage: issues sync [--run ID]");
+      const runId = await resolveRunId(store, parsed);
+      return printJson(await syncTaskIssues(store, runId, repo.root));
+    }
+    case "worktree": {
+      const runId = await resolveRunId(store, parsed);
+      return printJson(await prepareTaskWorktree(store, runId, requiredOption(parsed, "task")));
+    }
+    case "commit": {
+      const runId = await resolveRunId(store, parsed);
+      return printJson(
+        await commitTask(
+          store,
+          runId,
+          requiredOption(parsed, "task"),
+          requiredOption(parsed, "message"),
+        ),
+      );
     }
     case "transition": {
       const runId = await resolveRunId(store, parsed);
@@ -144,6 +166,9 @@ function printHelp(): void {
       "  start --goal TEXT [--lane fast|build|deep|autonomous]",
       "  status [--run ID]",
       "  plan --file PLAN.json [--run ID]",
+      "  issues sync [--run ID]",
+      "  worktree --task TASK [--run ID]",
+      "  commit --task TASK --message TEXT [--run ID]",
       "  transition --to STATUS [--run ID]",
       "  gate [--run ID]",
     ].join("\n"),

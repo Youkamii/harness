@@ -22,25 +22,14 @@ export async function discoverRepo(cwd) {
     };
 }
 export async function workspaceFingerprint(repoRoot) {
-    const head = await runChecked({
+    const filesResult = await runChecked({
         executable: "git",
-        args: ["rev-parse", "HEAD"],
+        args: ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
         cwd: repoRoot,
     });
-    const diff = await runChecked({
-        executable: "git",
-        args: ["diff", "--binary", "--no-ext-diff", "HEAD", "--"],
-        cwd: repoRoot,
-        maxOutputBytes: 16 * 1024 * 1024,
-    });
-    const untrackedResult = await runChecked({
-        executable: "git",
-        args: ["ls-files", "--others", "--exclude-standard", "-z"],
-        cwd: repoRoot,
-    });
-    const untracked = untrackedResult.stdout.split("\u0000").filter(Boolean).sort();
+    const files = [...new Set(filesResult.stdout.split("\u0000").filter(Boolean))].sort();
     const hashes = [];
-    for (const relativePath of untracked) {
+    for (const relativePath of files) {
         const absolutePath = path.resolve(repoRoot, relativePath);
         assertWithin(repoRoot, absolutePath);
         try {
@@ -51,17 +40,30 @@ export async function workspaceFingerprint(repoRoot) {
             else if (metadata.isFile()) {
                 const resolved = await realpath(absolutePath);
                 assertWithin(repoRoot, resolved);
-                hashes.push(`${relativePath}:${sha256(await readFile(resolved))}`);
+                hashes.push(`${relativePath}:file:${metadata.mode.toString(8)}:${sha256(await readFile(resolved))}`);
             }
             else {
                 hashes.push(`${relativePath}:unsupported`);
             }
         }
         catch {
+            if ((await pathExists(absolutePath)) === false)
+                continue;
             hashes.push(`${relativePath}:unreadable`);
         }
     }
-    return sha256([head.stdout.trim(), diff.stdout, ...hashes].join("\n"));
+    return sha256(hashes.join("\n"));
+}
+async function pathExists(candidate) {
+    try {
+        await lstat(candidate);
+        return true;
+    }
+    catch (error) {
+        if (error.code === "ENOENT")
+            return false;
+        throw error;
+    }
 }
 export function assertWithin(root, candidate) {
     const relative = path.relative(path.resolve(root), path.resolve(candidate));

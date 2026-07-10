@@ -73,4 +73,72 @@ export async function addEvidence(store, runId, evidence) {
         return state;
     }, { evidenceId: record.id, kind: record.kind, status: record.status });
 }
+export async function setTaskIssue(store, runId, taskId, issue) {
+    return await store.update(runId, "task.issue.synchronized", (state) => {
+        requireTask(state, taskId).issue = issue;
+        return state;
+    }, { taskId, issueNumber: issue.number, marker: issue.marker });
+}
+export async function setTaskWorktree(store, runId, taskId, worktree) {
+    return await store.update(runId, "task.worktree.prepared", (state) => {
+        const task = requireTask(state, taskId);
+        task.branch = worktree.branch;
+        task.worktreePath = worktree.worktreePath;
+        task.baseSha = worktree.baseSha;
+        return state;
+    }, { taskId, ...worktree });
+}
+export async function recordTaskCommit(store, runId, taskId, commitSha, evidence) {
+    return await store.update(runId, "task.committed", (state) => {
+        const task = requireTask(state, taskId);
+        if (task.status !== "verifying") {
+            throw new Error(`task ${taskId} must be verifying before commit, got ${task.status}`);
+        }
+        task.status = "committed";
+        task.commitSha = commitSha;
+        state.evidence.push({
+            ...evidence,
+            id: randomUUID(),
+            recordedAt: new Date().toISOString(),
+        });
+        return state;
+    }, { taskId, commitSha });
+}
+export async function beginEffect(store, runId, input) {
+    let effect;
+    const state = await store.update(runId, "effect.pending", (current) => {
+        effect = current.outbox.find((candidate) => candidate.key === input.key);
+        if (!effect) {
+            effect = {
+                id: randomUUID(),
+                key: input.key,
+                kind: input.kind,
+                status: "pending",
+                createdAt: new Date().toISOString(),
+            };
+            current.outbox.push(effect);
+        }
+        return current;
+    }, input);
+    if (!effect)
+        throw new Error("failed to create effect");
+    return { state, effect };
+}
+export async function completeEffect(store, runId, effectId, result) {
+    return await store.update(runId, "effect.completed", (state) => {
+        const effect = state.outbox.find((candidate) => candidate.id === effectId);
+        if (!effect)
+            throw new Error(`unknown effect: ${effectId}`);
+        effect.status = "complete";
+        effect.completedAt = new Date().toISOString();
+        effect.result = result;
+        return state;
+    }, { effectId, result });
+}
+function requireTask(state, taskId) {
+    const task = state.tasks.find((candidate) => candidate.id === taskId);
+    if (!task)
+        throw new Error(`unknown task: ${taskId}`);
+    return task;
+}
 //# sourceMappingURL=operations.js.map
