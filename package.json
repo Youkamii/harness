@@ -1,0 +1,21 @@
+{
+  "name": "codex-harness-2026-07-11",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Codex-native autonomous personal harness",
+  "scripts": {
+    "build": "tsc -p plugins/codex-harness/tsconfig.json",
+    "check": "tsc -p plugins/codex-harness/tsconfig.json --noEmit",
+    "test": "npm run build && node --test plugins/codex-harness/test/*.test.mjs",
+    "validate": "node scripts/validate.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
+

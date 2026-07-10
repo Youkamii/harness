@@ -1,59 +1,19 @@
-# Harness
+# Codex Harness
 
-월 구독에 포함된 Claude Code를 엔진으로 쓰는 **개인 하네스** — 행동 통제(훅/권한), 반복 프롬프트(CLAUDE.md/스킬), 장기 실행(오케스트레이터), 측정(evals). API 추가 과금 없음.
+A Codex-native personal harness for autonomous issue-to-verified-commit execution. It combines an installable Codex plugin with a deterministic local control plane for durable goals, task DAGs, GitHub issues, evidence gates, resumable execution, and adversarial multi-agent review.
 
-- 구조 설명: [docs/architecture.md](docs/architecture.md)
-- 기반 리서치: [docs/harness-engineering-research.md](docs/harness-engineering-research.md)
+## Status
 
-## 빠른 사용법
+Active development. The repository was rebuilt for Codex on 2026-07-11; the previous Claude-oriented implementation remains available in Git history.
 
-**macOS / Linux**
-
-```bash
-# 최초 1회 (PC마다): 전역 설치 — harness 명령이 생긴다
-./install.sh
-
-# 이후 평소 사용: 아무 폴더에서 claude 실행하면 하네스가 자동 적용됨
-claude
-```
-
-**Windows (PowerShell)**
-
-```powershell
-# 최초 1회 (PC마다): 전역 설치 — harness 명령이 생긴다 (Node.js 필요)
-.\install.ps1
-
-# 이후 평소 사용: 아무 폴더에서 claude 실행하면 하네스가 자동 적용됨
-claude
-```
-
-> Windows에서는 훅·스킬·설치가 모두 동작한다(`harness test`로 훅 회귀 테스트 확인 가능). 다만 `harness eval`의 채점 스크립트(`check.sh`)와 fizzbuzz 태스크는 `bash`·`python3`를 쓰므로 Git Bash 등 별도 설치가 있어야 한다.
-
-`harness` 명령 (설치 후 어디서나):
+## Development
 
 ```bash
-harness run "목표" --cwd ~/Git/대상프로젝트   # 장기 실행 (한도 도달 시 자동 대기)
-harness eval                                  # 하네스 성능 측정
-harness update                                # 다른 PC에서 수정사항 받기 (git pull + 재설치)
-harness edit                                  # 하네스 소스를 Claude Code로 열기
-harness test                                  # guard 훅 회귀 테스트
+npm install
+npm run build
+npm test
+npm run validate
 ```
 
-새 PC에 설치:
-- macOS/Linux: `git clone <저장소주소> ~/Git/Harness && ~/Git/Harness/install.sh`
-- Windows: `git clone <저장소주소> $HOME\Git\Harness; & $HOME\Git\Harness\install.ps1`
+The plugin is under `plugins/codex-harness`. Installation and workflow documentation is expanded as the implementation issues land.
 
-## 세션 안에서 쓰는 명령
-
-| 명령 | 역할 |
-|---|---|
-| `/checkpoint` | 진행 상황을 `.harness/` 파일로 저장 (다음 세션 이어받기용) |
-| `/resume` | 저장된 진행 상황과 git log를 읽고 작업 이어받기 |
-| `evaluator` 서브에이전트 | "evaluator로 검증해줘" — 결과물을 적대적으로 실행 검증 |
-
-## 안전장치 요약
-
-- **권한**: 기본 자동 진행, `rm -rf`/`sudo`/`git push`/`curl`만 승인 요청 (`.claude/settings.json`)
-- **훅**: 승인을 건너뛰는 모드에서도 파괴적 명령(홈 삭제, 강제 푸시, 디스크 쓰기 등)은 코드로 차단 (`.claude/hooks/guard.js`)
-- **비밀 커밋 차단**: `git add/commit` 직전에 API 키·암호·토큰·`.env`가 섞였는지 검사해 차단 (`.claude/hooks/secrets-guard.js`)
-- **비밀 읽기 차단**: `.env`, `secrets/` 읽기 자체를 거부

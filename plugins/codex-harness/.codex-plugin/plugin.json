@@ -1,0 +1,25 @@
+{
+  "name": "codex-harness",
+  "version": "0.1.0",
+  "description": "Autonomous Codex-native issue-to-verified-commit harness with durable tasks and adversarial multi-agent review.",
+  "author": {
+    "name": "Youkamii",
+    "url": "https://github.com/Youkamii"
+  },
+  "homepage": "https://github.com/Youkamii/codex-harness-2026-07-11",
+  "repository": "https://github.com/Youkamii/codex-harness-2026-07-11",
+  "license": "MIT",
+  "keywords": ["codex", "harness", "autonomous", "multi-agent", "verification"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codex Harness",
+    "shortDescription": "Autonomous issue-to-verified-commit execution",
+    "longDescription": "Runs Codex through durable planning, GitHub issue tracking, feature commits, evidence gates, independent verification, and adversarial multi-agent review while minimizing user interruptions.",
+    "developerName": "Youkamii",
+    "category": "Engineering",
+    "capabilities": ["Interactive", "Read", "Write"],
+    "defaultPrompt": [
+      "Finish this feature autonomously and prove it is complete."
+    ]
+  }
+}

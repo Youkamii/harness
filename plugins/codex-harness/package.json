@@ -1,0 +1,14 @@
+{
+  "name": "@youkamii/codex-harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Codex-native autonomous harness runtime",
+  "bin": {
+    "codex-harness": "./runtime/cli.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
+
