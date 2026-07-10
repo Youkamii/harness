@@ -19,7 +19,7 @@
     "category": "Engineering",
     "capabilities": ["Interactive", "Read", "Write"],
     "defaultPrompt": [
-      "Finish this feature autonomously and prove it is complete."
+      "Use $forge to finish this feature autonomously and prove it is complete."
     ]
   }
 }

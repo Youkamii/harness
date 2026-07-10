@@ -1,6 +1,6 @@
 ---
 name: forge
-description: Autonomously deliver non-trivial software changes from request to verified completion with minimal user questions. Use when Codex should inspect a repository, create or link a GitHub issue, build a dependency-aware task plan, implement feature-scoped commits, run tests, recover from failures, invoke independent subagents, and perform adversarial review before claiming completion.
+description: Autonomously deliver software changes from request to verified completion with minimal user questions. Use for features, bug fixes, refactors, migrations, and multi-step repository changes when Codex should create or link GitHub issues, plan tasks, make feature-scoped commits, run tests, recover from failures, invoke independent subagents, and perform adversarial review. Do not use for read-only explanations or status reports.
 ---
 
 # Forge
@@ -68,4 +68,3 @@ Never accept `PASS`, `DONE`, or a subagent status message as completion evidence
 - Scrub secrets before writing evidence or remote issue comments.
 
 Use [roles.md](references/roles.md) for delegation packets and [workflow.md](references/workflow.md) for exact completion rules.
-

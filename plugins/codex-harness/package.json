@@ -8,7 +8,6 @@
     "codex-harness": "./runtime/cli.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.11"
   }
 }
-

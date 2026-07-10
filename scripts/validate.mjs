@@ -1,7 +1,8 @@
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = path.resolve(import.meta.dirname, "..");
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const pluginRoot = path.join(root, "plugins", "codex-harness");
 const failures = [];
 
@@ -39,11 +40,11 @@ const skillRoot = path.join(pluginRoot, "skills");
 for (const entry of await readdir(skillRoot, { withFileTypes: true })) {
   if (!entry.isDirectory()) continue;
   const skillPath = path.join(skillRoot, entry.name, "SKILL.md");
-  const text = await readFile(skillPath, "utf8");
+  const text = (await readFile(skillPath, "utf8")).replaceAll("\r\n", "\n");
   if (!text.startsWith("---\n")) failures.push(`${entry.name}: missing YAML frontmatter`);
   if (!text.includes(`name: ${entry.name}\n`)) failures.push(`${entry.name}: name mismatch`);
   if (/\[TODO:|\bTODO\b/.test(text)) failures.push(`${entry.name}: contains TODO text`);
-  const lineCount = text.split(/\r?\n/).length;
+  const lineCount = text.split("\n").length;
   if (lineCount > 500) failures.push(`${entry.name}: SKILL.md exceeds 500 lines`);
 }
 
@@ -53,4 +54,3 @@ if (failures.length > 0) {
 }
 
 process.stdout.write("repository validation passed\n");
-
