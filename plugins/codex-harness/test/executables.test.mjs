@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -39,7 +39,7 @@ test("Windows npm-prefix installs resolve the native Codex binary", { skip: proc
       shell: false,
     });
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(path.resolve(result.stdout), path.resolve(binary));
+    assert.equal(await realpath(result.stdout), await realpath(binary));
   } finally {
     await rm(prefix, { recursive: true, force: true });
   }

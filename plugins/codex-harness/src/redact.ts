@@ -43,6 +43,14 @@ export function sanitizedEnvironment(source: NodeJS.ProcessEnv = process.env): N
   );
 }
 
+export function offlineEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(sanitizedEnvironment(source)).filter(
+      ([name]) => !/^(?:HTTP|HTTPS|ALL|NO)_PROXY$/i.test(name) && !/^NPM_CONFIG_(?:PROXY|HTTPS_PROXY)$/i.test(name),
+    ),
+  );
+}
+
 export function githubControllerEnvironment(
   source: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {

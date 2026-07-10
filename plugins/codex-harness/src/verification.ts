@@ -5,7 +5,7 @@ import { currentConfigHash } from "./domain.js";
 import { resolveCodexExecutable } from "./executables.js";
 import { reviewTask } from "./autonomy.js";
 import { addEvidence, setTaskStatus } from "./operations.js";
-import { sanitizedEnvironment, redactSecrets } from "./redact.js";
+import { offlineEnvironment, redactSecrets } from "./redact.js";
 import { realpathWithin, workspaceFingerprint } from "./repo.js";
 import { runProcess } from "./process.js";
 import { RunStore } from "./store.js";
@@ -83,7 +83,7 @@ async function runChecks(
   const home = path.join(store.root, "sandbox-home", runId, taskId);
   await mkdir(home, { recursive: true, mode: 0o700 });
   const environment = {
-    ...sanitizedEnvironment(),
+    ...offlineEnvironment(),
     HOME: home,
     USERPROFILE: home,
     GH_CONFIG_DIR: path.join(home, ".config", "gh"),

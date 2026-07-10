@@ -5,6 +5,7 @@ import {
   codexControllerEnvironment,
   githubControllerEnvironment,
   containsLikelySecret,
+  offlineEnvironment,
   redactSecrets,
   sanitizedEnvironment,
 } from "../runtime/redact.js";
@@ -48,6 +49,21 @@ test("trusted controller calls retain only their required headless credentials",
   assert.equal(codex.OPENAI_API_KEY, "openai-secret");
   assert.equal(codex.GH_TOKEN, undefined);
   assert.equal(codex.PASSWORD, undefined);
+});
+
+test("offline verification removes proxy routes without mutating the host environment", () => {
+  const source = {
+    PATH: "safe",
+    HTTP_PROXY: "http://127.0.0.1:8080",
+    https_proxy: "http://127.0.0.1:8081",
+    NPM_CONFIG_PROXY: "http://127.0.0.1:8082",
+  };
+  const environment = offlineEnvironment(source);
+  assert.equal(environment.PATH, "safe");
+  assert.equal(environment.HTTP_PROXY, undefined);
+  assert.equal(environment.https_proxy, undefined);
+  assert.equal(environment.NPM_CONFIG_PROXY, undefined);
+  assert.equal(source.HTTP_PROXY, "http://127.0.0.1:8080");
 });
 
 test("shell metacharacters remain inert bounded text", () => {
