@@ -7,6 +7,7 @@ import { addEvidence, setTaskStatus } from "./operations.js";
 import { offlineEnvironment, redactSecrets } from "./redact.js";
 import { realpathWithin, workspaceFingerprint } from "./repo.js";
 import { runProcess } from "./process.js";
+import { assertSandboxNetworkIsolation } from "./sandbox-network.js";
 export async function captureBaseline(store, runId, taskId) {
     return await runChecks(store, runId, taskId, "baseline");
 }
@@ -56,6 +57,7 @@ async function runChecks(store, runId, taskId, phase, options = {}) {
     for (const command of task.checks) {
         const cwd = await realpathWithin(worktree, path.resolve(worktree, command.cwd ?? "."));
         const executable = await resolveExecutable(command.argv[0] ?? "", cwd, worktree, environment);
+        await assertSandboxNetworkIsolation({ codexExecutable, cwd, env: environment });
         const result = await runProcess({
             executable: codexExecutable,
             args: [

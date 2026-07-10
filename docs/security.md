@@ -11,7 +11,8 @@ The controller uses argument arrays with `shell: false` for Codex, Git, GitHub C
 - Builders receive only workspace-write access to an isolated worktree and no nested plugins, apps, browser, computer use, or agents.
 - Planners and reviewers are read-only and ephemeral.
 - Verification commands run inside `codex sandbox` with direct network disabled.
-- Verification receives a temporary home, empty Git/GitHub/npm configuration paths, and an environment scrubbed of token, secret, password, API key, cloud, SSH-agent, and npm-token variables.
+- Verification receives a temporary home, empty Git/GitHub/npm configuration paths, and an environment scrubbed of token, secret, password, API key, cloud, SSH-agent, npm-token, and proxy variables.
+- Before any planned check runs, an inert probe must prove that the same sandbox cannot reach the public network. If the OS sandbox is unavailable or permits direct access, verification fails closed without executing the planned command.
 - Authoritative state is kept in the Git common directory, outside all worker worktrees.
 
 `-a never` means workers cannot interrupt the user with approval requests. It does not bypass the sandbox. The dangerous Codex bypass flags are never emitted.
@@ -39,4 +40,4 @@ GitHub issues use a stable run marker, opaque task hash, exact run search, run l
 - baseline checks that mutate source before a builder starts;
 - dead controller locks and simultaneous resume processes.
 
-Residual boundary: repository tests are arbitrary code. The harness contains them with the Codex OS sandbox and no-network state, but an operating-system or Codex sandbox vulnerability remains outside this repository's control.
+Residual boundary: repository tests are arbitrary code. The harness contains them with the Codex OS sandbox and a proved no-network state. An operating-system or Codex sandbox vulnerability remains outside this repository's control; environments that cannot prove isolation are blocked rather than silently downgraded.

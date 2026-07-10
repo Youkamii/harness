@@ -13,7 +13,7 @@ async function withTempStore(callback) {
   try {
     return await callback(new RunStore(root), root);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 }
 
