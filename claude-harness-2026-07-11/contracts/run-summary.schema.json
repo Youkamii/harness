@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "harness:contracts/run-summary/v1",
+  "title": "RunSummary",
+  "description": "워크플로우 실행 1회의 기록. 종료 직후 메인 루프가 .claude/workflow-runs/<run_id>/summary.json에 기록한다.",
+  "type": "object",
+  "required": ["contract", "run_id", "workflow", "startedAt", "finishedAt", "status", "counts"],
+  "properties": {
+    "contract": { "const": "run-summary/v1" },
+    "run_id": { "type": "string", "minLength": 1 },
+    "workflow": { "type": "string", "minLength": 1 },
+    "startedAt": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T" },
+    "finishedAt": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T" },
+    "status": { "enum": ["ok", "partial", "failed", "aborted"] },
+    "counts": {
+      "type": "object",
+      "required": ["agents", "findings", "confirmed"],
+      "properties": {
+        "agents": { "type": "integer", "minimum": 0 },
+        "findings": { "type": "integer", "minimum": 0 },
+        "confirmed": { "type": "integer", "minimum": 0 },
+        "disputed": { "type": "integer", "minimum": 0 },
+        "unverified": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "description": "상한 집행은 Workflow 도구 내장 budget이 담당한다. 여기는 기록만.",
+      "properties": {
+        "target": { "type": ["integer", "null"] },
+        "spentOutputTokens": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

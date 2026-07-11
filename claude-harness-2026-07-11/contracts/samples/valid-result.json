@@ -1,0 +1,43 @@
+{
+  "contract": "workflow-result/v1",
+  "workflow": "red-review",
+  "target": { "repo": "example/repo", "ref": "feature-branch", "scope": "diff" },
+  "status": "ok",
+  "findings": [
+    {
+      "id": "RR-001",
+      "title": "세션 만료 시 null 참조로 크래시",
+      "severity": "critical",
+      "file": "src/auth.ts",
+      "line": 47,
+      "claim": "세션 쿠키 만료 시 user가 null인데 바로 프로퍼티에 접근한다",
+      "evidence": "node test/auth.test.mjs 실행 시 'expired session' 케이스 실패로 재현됨",
+      "verification": "CONFIRMED",
+      "verifiedBy": ["claude-lens", "codex", "test"],
+      "action": "fix"
+    },
+    {
+      "id": "RR-002",
+      "title": "동일 키 동시 요청 시 중복 fetch 가능성",
+      "severity": "minor",
+      "file": "src/data.ts",
+      "claim": "캐시 미스가 겹치면 fetch가 두 번 나간다",
+      "verification": "DISPUTED",
+      "verifiedBy": ["codex"],
+      "action": "reject"
+    },
+    {
+      "id": "RR-003",
+      "title": "에러 메시지에 내부 경로 노출 의심",
+      "severity": "major",
+      "file": "src/errors.ts",
+      "verification": "UNVERIFIED",
+      "action": "defer"
+    }
+  ],
+  "notes": [
+    "node_modules와 생성 파일은 검사에서 제외함",
+    "diff 범위 밖 파일은 검사하지 않음"
+  ],
+  "usage": { "agents": 4, "crossModelCalls": 2, "durationSeconds": 312 }
+}

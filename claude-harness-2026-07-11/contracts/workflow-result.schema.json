@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "harness:contracts/workflow-result/v1",
+  "title": "WorkflowResult",
+  "description": "harness의 모든 저장 워크플로우(red-review, deep-audit, memory-audit 등)가 반환하는 공통 결과 envelope. CONFIRMED 판정은 외부 증거 없이 통과할 수 없다.",
+  "type": "object",
+  "required": ["contract", "workflow", "status", "findings", "usage"],
+  "properties": {
+    "contract": { "const": "workflow-result/v1" },
+    "workflow": { "type": "string", "minLength": 1 },
+    "target": {
+      "type": "object",
+      "properties": {
+        "repo": { "type": "string" },
+        "ref": { "type": "string" },
+        "scope": { "enum": ["diff", "paths", "full"] }
+      }
+    },
+    "status": { "enum": ["ok", "partial", "failed"] },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "notes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "커버리지 제한·생략 사항. 검사 범위를 줄였으면 반드시 여기 남긴다 (조용한 축소 금지)."
+    },
+    "usage": {
+      "type": "object",
+      "required": ["agents"],
+      "properties": {
+        "agents": { "type": "integer", "minimum": 0 },
+        "crossModelCalls": { "type": "integer", "minimum": 0 },
+        "durationSeconds": { "type": "number", "minimum": 0 }
+      }
+    }
+  },
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "required": ["id", "title", "severity", "verification"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "severity": { "enum": ["critical", "major", "minor", "info"] },
+        "file": { "type": "string" },
+        "line": { "type": "integer", "minimum": 1 },
+        "claim": { "type": "string", "description": "무엇이 왜 문제인가" },
+        "evidence": { "type": "string", "minLength": 1, "description": "재현 명령·테스트·정적 분석 결과 등 모델 판단 밖의 증거" },
+        "verification": { "enum": ["CONFIRMED", "DISPUTED", "UNVERIFIED"] },
+        "verifiedBy": {
+          "type": "array",
+          "items": { "enum": ["claude-lens", "codex", "test", "static-analysis", "human"] }
+        },
+        "action": { "enum": ["fix", "defer", "reject"] }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "verification": { "const": "CONFIRMED" } },
+            "required": ["verification"]
+          },
+          "then": { "required": ["evidence", "verifiedBy"] }
+        }
+      ]
+    }
+  }
+}

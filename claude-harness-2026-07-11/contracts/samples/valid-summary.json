@@ -1,0 +1,10 @@
+{
+  "contract": "run-summary/v1",
+  "run_id": "wf_red-review_20260711_001",
+  "workflow": "red-review",
+  "startedAt": "2026-07-11T10:00:00Z",
+  "finishedAt": "2026-07-11T10:05:12Z",
+  "status": "ok",
+  "counts": { "agents": 4, "findings": 3, "confirmed": 1, "disputed": 1, "unverified": 1 },
+  "budget": { "target": null, "spentOutputTokens": 48210 }
+}
