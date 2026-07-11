@@ -1,0 +1,98 @@
+import path from "node:path";
+import { resolveCodexExecutable } from "./executables.js";
+import { runProcess } from "./process.js";
+import { githubControllerEnvironment, offlineEnvironment, redactSecrets, sanitizedEnvironment } from "./redact.js";
+import { assertSandboxNetworkIsolation } from "./sandbox-network.js";
+export async function runDoctor(repoRoot) {
+    const checks = [];
+    checks.push({
+        name: "node-version",
+        passed: nodeAtLeast(20, 11),
+        detail: process.version,
+    });
+    checks.push(await commandCheck("git", "git", ["rev-parse", "--show-toplevel"], repoRoot));
+    checks.push(await commandCheck("github-auth", "gh", ["auth", "status", "--hostname", "github.com"], repoRoot, githubControllerEnvironment()));
+    try {
+        const codex = await resolveCodexExecutable();
+        const codexCheck = await commandCheck("codex", codex, ["--version"], repoRoot);
+        const version = codexCheck.detail.match(/(\d+)\.(\d+)\.(\d+)/)?.slice(1).map(Number);
+        if (codexCheck.passed && (!version || !versionAtLeast(version, [0, 144, 1]))) {
+            codexCheck.passed = false;
+            codexCheck.detail += " (minimum supported version is 0.144.1)";
+        }
+        checks.push(codexCheck);
+        try {
+            await assertSandboxNetworkIsolation({
+                codexExecutable: codex,
+                cwd: repoRoot,
+                env: offlineEnvironment(),
+            });
+            checks.push(await commandCheck("verification-sandbox", codex, [
+                "sandbox",
+                "--sandbox-state-disable-network",
+                "--sandbox-state-readable-root",
+                path.dirname(process.execPath),
+                "-P",
+                ":workspace",
+                "-C",
+                repoRoot,
+                "--",
+                process.execPath,
+                "--version",
+            ], repoRoot, offlineEnvironment()));
+        }
+        catch (error) {
+            checks.push({
+                name: "verification-sandbox",
+                passed: false,
+                detail: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+    catch (error) {
+        checks.push({
+            name: "codex",
+            passed: false,
+            detail: error instanceof Error ? error.message : String(error),
+        });
+    }
+    return { passed: checks.every((check) => check.passed), checks };
+}
+async function commandCheck(name, executable, args, cwd, env = sanitizedEnvironment()) {
+    try {
+        const result = await runProcess({
+            executable,
+            args,
+            cwd,
+            env,
+            timeoutMs: 30_000,
+            maxOutputBytes: 256 * 1024,
+        });
+        const detail = redactSecrets([result.stdout, result.stderr]
+            .filter(Boolean)
+            .join("\n")
+            .trim())
+            .slice(0, 1_000);
+        return {
+            name,
+            passed: result.exitCode === 0 && !result.timedOut,
+            detail: detail || `exit ${result.exitCode}`,
+        };
+    }
+    catch (error) {
+        return { name, passed: false, detail: error instanceof Error ? error.message : String(error) };
+    }
+}
+function nodeAtLeast(major, minor) {
+    const [currentMajor = 0, currentMinor = 0] = process.versions.node.split(".").map(Number);
+    return currentMajor > major || (currentMajor === major && currentMinor >= minor);
+}
+function versionAtLeast(current, minimum) {
+    for (let index = 0; index < minimum.length; index += 1) {
+        const difference = (current[index] ?? 0) - (minimum[index] ?? 0);
+        if (difference !== 0)
+            return difference > 0;
+    }
+    return true;
+}
+//# sourceMappingURL=doctor.js.map

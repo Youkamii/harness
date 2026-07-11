@@ -1,0 +1,4 @@
+interface:
+  display_name: "Forge Adversarial Review"
+  short_description: "Independent adversarial completion review"
+  default_prompt: "Use $forge-review to challenge this implementation and verify its completion evidence."
