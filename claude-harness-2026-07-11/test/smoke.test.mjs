@@ -26,6 +26,7 @@ const REQUIRED = [
   'contracts/workflow-result.schema.json',
   'contracts/run-summary.schema.json',
   'contracts/validate.mjs',
+  'workflows/red-review.js',
   'hooks/guard.js',
   'hooks/guard.test.js',
   'hooks/secrets-guard.mjs',

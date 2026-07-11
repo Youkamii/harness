@@ -9,7 +9,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 
 export const MANIFEST_FILE = 'assets-manifest.json';
-export const ASSET_DIRS = ['skills', 'agents', 'hooks', 'contracts'];
+export const ASSET_DIRS = ['skills', 'agents', 'hooks', 'contracts', 'workflows'];
 export const ASSET_FILES = ['CLAUDE.md'];
 
 const BEGIN = '<!-- G-HARNESS BEGIN -->';

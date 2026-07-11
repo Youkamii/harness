@@ -57,7 +57,7 @@ for (const rel of findStaleDeployed(CLAUDE, fresh)) {
 }
 
 // ③ 파일 복사 (기존의 다른 스킬/에이전트는 건드리지 않고 병합)
-for (const dir of ['skills', 'agents', 'hooks', 'contracts']) {
+for (const dir of ['skills', 'agents', 'hooks', 'contracts', 'workflows']) {
   fs.cpSync(path.join(REPO, dir), path.join(CLAUDE, dir), { recursive: true });
   console.log(`[install] ${dir}/ 복사 완료`);
 }
