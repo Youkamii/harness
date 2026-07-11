@@ -1,7 +1,8 @@
 // contracts 전용 JSON Schema 부분집합 검증기 — 의존성 제로.
 // 범용 검증기가 아니다. 계약 파일에 새 키워드를 쓰려면 여기에 먼저 구현하고 테스트를 추가한다.
-// 지원: type(배열 포함), required, properties, items, enum, const, minLength,
-//       minimum, pattern, $ref(#/$defs/* 로컬만), allOf, if/then/else
+// 역도 성립: 계약이 안 쓰는 키워드는 구현하지 않는다 (red-review — 미사용 else/boolean 제거됨).
+// 지원: type(배열 포함), required, properties, items, minItems, enum, const, minLength,
+//       minimum, pattern, $ref(#/$defs/* 로컬만), allOf, if/then
 
 export function validate(schema, data, root = schema, path = '$') {
   const errors = [];
@@ -36,8 +37,13 @@ export function validate(schema, data, root = schema, path = '$') {
       if (key in data) errors.push(...validate(sub, data[key], root, `${path}.${key}`));
     }
   }
-  if (Array.isArray(data) && s.items) {
-    data.forEach((item, i) => errors.push(...validate(s.items, item, root, `${path}[${i}]`)));
+  if (Array.isArray(data)) {
+    if (s.minItems !== undefined && data.length < s.minItems) {
+      errors.push(`${path}: minItems ${s.minItems} 미달 (실제: ${data.length}개)`);
+    }
+    if (s.items) {
+      data.forEach((item, i) => errors.push(...validate(s.items, item, root, `${path}[${i}]`)));
+    }
   }
   for (const sub of s.allOf ?? []) {
     errors.push(...validate(sub, data, root, path));
@@ -45,7 +51,6 @@ export function validate(schema, data, root = schema, path = '$') {
   if (s.if) {
     const passes = validate(s.if, data, root, path).length === 0;
     if (passes && s.then) errors.push(...validate(s.then, data, root, path));
-    if (!passes && s.else) errors.push(...validate(s.else, data, root, path));
   }
   return errors;
 }
@@ -65,7 +70,6 @@ function checkType(type, data) {
     case 'string': return typeof data === 'string';
     case 'integer': return Number.isInteger(data);
     case 'number': return typeof data === 'number' && Number.isFinite(data);
-    case 'boolean': return typeof data === 'boolean';
     case 'null': return data === null;
     default: throw new Error(`지원하지 않는 type: ${type}`);
   }

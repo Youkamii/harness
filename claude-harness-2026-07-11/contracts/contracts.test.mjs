@@ -42,6 +42,8 @@ const resultCases = [
   ['finding.verification 누락', (d) => { delete d.findings[0].verification; }, '필수 키 "verification"'],
   ['CONFIRMED인데 evidence 없음 (외부 증거 강제)', (d) => { delete d.findings[0].evidence; }, '필수 키 "evidence"'],
   ['CONFIRMED인데 verifiedBy 없음', (d) => { delete d.findings[0].verifiedBy; }, '필수 키 "verifiedBy"'],
+  ['CONFIRMED인데 verifiedBy가 빈 배열 (퇴화값 우회 차단)', (d) => { d.findings[0].verifiedBy = []; }, 'minItems'],
+  ['CONFIRMED인데 evidence가 공백뿐 (퇴화값 우회 차단)', (d) => { d.findings[0].evidence = '   '; }, 'pattern'],
   ['usage.agents 음수', (d) => { d.usage.agents = -1; }, 'minimum'],
   ['severity 미정의 값', (d) => { d.findings[0].severity = 'blocker'; }, 'enum'],
   ['findings가 배열이 아님', (d) => { d.findings = {}; }, 'type'],

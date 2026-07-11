@@ -1,5 +1,9 @@
-// 자산 manifest 공용 로직 — install.mjs / build-manifest.mjs / smoke 테스트가 공유한다.
+// 자산 manifest 공용 로직 — install.mjs / 테스트가 공유한다.
+// manifest는 저장소에 커밋하지 않는다: 소스의 이력은 git이 정본이고,
+// 설치 시점 스냅숏은 배포본(~/.claude/assets-manifest.json)에만 저장해
+// "소스에서 삭제됐지만 배포본에 잔존하는 자산" 검출에 쓴다 (red-review 발견).
 // 해시는 개행 정규화(CRLF→LF) 후 계산: git·OS 개행 차이를 드리프트로 오인하지 않기 위함.
+// (.gitattributes의 `* -text`와 이중이지만 목적이 다르다 — 저쪽은 checkout 보호, 이쪽은 git 밖 배포본 비교 보호)
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -16,11 +20,14 @@ export function sha256Normalized(buf) {
   return crypto.createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
-function* walk(dir) {
+// 일반 파일만 순회한다. 심볼릭 링크·정션은 isFile()=false라 자동 제외
+// (이전 구현은 readFileSync EISDIR 크래시 — red-review 발견).
+export function* walk(dir, ignore = new Set(['.git', 'node_modules'])) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (ignore.has(e.name)) continue;
     const p = path.join(dir, e.name);
-    if (e.isDirectory()) yield* walk(p);
-    else yield p;
+    if (e.isDirectory()) yield* walk(p, ignore);
+    else if (e.isFile()) yield p;
   }
 }
 
@@ -77,4 +84,25 @@ export function verifyDeployed(claudeDir, repo, manifest) {
     }
   }
   return problems;
+}
+
+// 잔존 자산 검출: 마지막 설치 스냅숏(배포본의 manifest)에는 있는데 현 소스에는 없는 파일.
+// 소스에서 삭제한 훅·스킬이 배포본에서 계속 실행되는 단방향 구멍을 막는다 (red-review 발견).
+export function findStaleDeployed(claudeDir, freshManifest) {
+  const prevPath = path.join(claudeDir, MANIFEST_FILE);
+  if (!fs.existsSync(prevPath)) return []; // 첫 설치 — 이전 스냅숏 없음
+  let prev;
+  try {
+    prev = JSON.parse(fs.readFileSync(prevPath, 'utf8'));
+  } catch {
+    return [`${MANIFEST_FILE}: 배포본 스냅숏이 손상됨 (재설치로 갱신)`];
+  }
+  const stale = [];
+  for (const rel of Object.keys(prev.assets ?? {})) {
+    if (rel === 'CLAUDE.md') continue; // 병합 파일 — 삭제 대상 아님
+    if (!(rel in freshManifest.assets) && fs.existsSync(path.join(claudeDir, ...rel.split('/')))) {
+      stale.push(rel);
+    }
+  }
+  return stale;
 }

@@ -47,10 +47,11 @@
         "file": { "type": "string" },
         "line": { "type": "integer", "minimum": 1 },
         "claim": { "type": "string", "description": "무엇이 왜 문제인가" },
-        "evidence": { "type": "string", "minLength": 1, "description": "재현 명령·테스트·정적 분석 결과 등 모델 판단 밖의 증거" },
+        "evidence": { "type": "string", "minLength": 1, "pattern": "\\S", "description": "재현 명령·테스트·정적 분석 결과 등 모델 판단 밖의 증거 (공백만은 불가)" },
         "verification": { "enum": ["CONFIRMED", "DISPUTED", "UNVERIFIED"] },
         "verifiedBy": {
           "type": "array",
+          "minItems": 1,
           "items": { "enum": ["claude-lens", "codex", "test", "static-analysis", "human"] }
         },
         "action": { "enum": ["fix", "defer", "reject"] }
