@@ -47,6 +47,7 @@ for (const test of [
   'hooks/secrets-guard.test.mjs',
   'contracts/contracts.test.mjs',
   'test/smoke.test.mjs',
+  'test/constitution.test.mjs',
 ]) {
   const t = spawnSync(process.execPath, [path.join(REPO, ...test.split('/'))], { encoding: 'utf8' });
   if (t.status !== 0) {

@@ -1,7 +1,7 @@
 {
   "contract": "assets-manifest/v1",
   "assets": {
-    "CLAUDE.md": "ba9e41b30827d33eb19c3cf3ac5be2dcf6c3207bed15b1e824da9e805255a504",
+    "CLAUDE.md": "c70205f10abdb6afe84de09a846896bab5b87844e71203a14b1f513f5bbf2ecb",
     "agents/red-reviewer.md": "1729645fd95ec1e573d1cff02a248a3133cd035606786336dce5150c3dd9eb11",
     "agents/verifier.md": "0dad452fc30714f8f9e166d8b55bb17f98beef342645dad3e074c902b52b78f0",
     "contracts/README.md": "394514b71176bd55b7253cc1a9ec18189cab6afe61c7859db167ed28c1f52f54",
