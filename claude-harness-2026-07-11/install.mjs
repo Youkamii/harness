@@ -33,9 +33,11 @@ if (process.argv.includes('--verify')) {
 for (const test of [
   'hooks/guard.test.js',
   'hooks/secrets-guard.test.mjs',
+  'hooks/format-changed.test.mjs',
   'contracts/contracts.test.mjs',
   'test/smoke.test.mjs',
   'test/constitution.test.mjs',
+  'test/memory-audit.test.mjs',
 ]) {
   const t = spawnSync(process.execPath, [path.join(REPO, ...test.split('/'))], { encoding: 'utf8' });
   if (t.status !== 0) {
@@ -105,6 +107,29 @@ for (const f of ['guard.js', 'secrets-guard.mjs']) {
   } else {
     entry.hooks.push({ type: 'command', command: process.execPath, args: [want], timeout: 10 });
     console.log(`[install] settings.json에 ${f} 훅 등록`);
+  }
+}
+
+// PostToolUse: format-changed 등록 (Edit|Write 후). opt-in이라 config 없으면 무동작 — 전역 등록해도 안전.
+let post = settings.hooks.PostToolUse;
+if (!Array.isArray(post)) post = settings.hooks.PostToolUse = post && typeof post === 'object' && post.hooks ? [post] : [];
+let postEntry = post.find((e) => e && e.matcher === 'Edit|Write');
+if (!postEntry) {
+  postEntry = { matcher: 'Edit|Write', hooks: [] };
+  post.push(postEntry);
+}
+if (!Array.isArray(postEntry.hooks)) postEntry.hooks = [];
+{
+  const want = path.join(CLAUDE, 'hooks', 'format-changed.mjs');
+  const existing = postEntry.hooks.find(
+    (h) => h && Array.isArray(h.args) && h.args.some((a) => baseName(a) === 'format-changed.mjs')
+  );
+  if (existing) {
+    existing.command = process.execPath;
+    existing.args = [want];
+  } else {
+    postEntry.hooks.push({ type: 'command', command: process.execPath, args: [want], timeout: 20 });
+    console.log('[install] settings.json에 format-changed.mjs PostToolUse 훅 등록');
   }
 }
 fs.writeFileSync(sp, JSON.stringify(settings, null, 2) + '\n');
