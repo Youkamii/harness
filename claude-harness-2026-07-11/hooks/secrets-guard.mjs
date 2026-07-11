@@ -4,6 +4,11 @@
 // 존재 이유: 에이전트가 키/암호가 든 파일을 검사 없이 커밋해버리는 사고가 실제로 있었음 (2026-06 사용자 보고).
 // 커밋된 비밀은 git 히스토리에 영구히 남고, 푸시되면 유출이다. 프롬프트(부탁)가 아니라 코드(집행)로 막는다.
 // (codex-harness-2026-07-11 에서 이식, PowerShell 툴 지원 추가)
+//
+// 알려진 구조적 한계 (크로스벤더 감사 #3, 코드로 못 막음):
+//   이 훅은 Bash/PowerShell '툴 명령 문자열'에서 git add/commit을 감지한다. 따라서 스크립트 래퍼
+//   (`npm run release`, `./scripts/commit.sh` 등)가 내부에서 git commit을 호출하면 훅이 발화하지 않는다.
+//   래퍼 커밋까지 막으려면 각 저장소에 git pre-commit 훅(다른 메커니즘)을 둬야 한다. 이 훅은 최전선이지 유일한 방어가 아니다.
 
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -18,9 +23,20 @@ const SECRET_PATTERNS = [
   [/\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{30,}/, 'GitHub Token'],
   [/github_pat_[A-Za-z0-9_]{22,}/, 'GitHub Fine-grained Token'],
   [/xox[baprs]-[A-Za-z0-9-]{10,}/, 'Slack Token'],
+  [/\bxapp-[0-9]-[A-Za-z0-9-]{10,}/, 'Slack App-Level Token'],
   [/AIza[0-9A-Za-z_-]{35}/, 'Google API Key'],
+  [/\bya29\.[A-Za-z0-9_-]{20,}/, 'Google OAuth Access Token'],
+  // 결제·CI·레지스트리 토큰 (크로스벤더 감사 #5·#6 — prefix 고유해 오탐 위험 낮음)
+  [/\b(sk|rk)_live_[A-Za-z0-9]{16,}/, 'Stripe Live Key'],
+  [/\bglpat-[A-Za-z0-9_-]{20,}/, 'GitLab PAT'],
+  [/\bnpm_[A-Za-z0-9]{36}/, 'npm Access Token'],
+  [/\bhf_[A-Za-z0-9]{30,}/, 'HuggingFace Token'],
   [/-----BEGIN [A-Z ]*PRIVATE KEY-----/, '개인키(Private Key)'],
-  [/(password|passwd|secret|api[_-]?key|access[_-]?token)\s*[:=]\s*["'][^"'\s]{8,}["']/i, '하드코딩된 비밀값 추정'],
+  // DB 커넥션 스트링 속 암호 (user:pass@host)
+  [/\b(postgres(ql)?|mysql|mongodb(\+srv)?|redis|amqps?):\/\/[^:@/\s]+:[^@/\s]{3,}@/i, 'DB 커넥션 스트링 내 암호'],
+  [/(password|passwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token)\s*[:=]\s*["'][^"'\s]{8,}["']/i, '하드코딩된 비밀값(따옴표)'],
+  // 무따옴표 설정값 (감사 #7). 오탐 억제: 16자 이상 + 숫자 포함 + 흔한 플레이스홀더/환경참조 제외
+  [/(password|passwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token)\s*[:=]\s*(?!["'\s]|\$\{|\$\(|<|changeme|your[-_]|example|placeholder|xxx|none\b|null\b|true\b|false\b)(?=[^\s"'#]*[0-9])[^\s"'#]{16,}/i, '하드코딩된 비밀값(무따옴표)'],
 ];
 
 // 내용과 무관하게 커밋 자체가 금지인 파일명 (.env.example 류 템플릿은 허용)
@@ -68,28 +84,50 @@ process.stdin.on('end', () => {
   const commitAll =
     /\bgit\b[^|;&]*\bcommit\b/.test(cmd) && /(^|\s)(-[a-zA-Z]*a[a-zA-Z]*|--all)(\s|$)/.test(cmd);
   if (hasAdd || commitAll) {
-    // add/commit -a 는 훅 시점엔 아직 실행 전이므로, 작업 트리의 변경·신규 파일을 함께 검사한다
-    for (const line of git('status', '--porcelain').split('\n')) {
-      const f = line.slice(3).trim().replace(/^"|"$/g, '');
-      if (f) files.add(f);
+    // add/commit -a 는 훅 시점엔 아직 실행 전이므로, 작업 트리의 변경·신규 파일을 함께 검사한다.
+    // -z(NUL 구분)로 읽어 비ASCII 파일명 C-quoting 파싱 실패를 피한다 (감사 렌즈외 지적)
+    for (const rec of git('status', '--porcelain', '-z').split('\0')) {
+      if (!rec) continue;
+      const mm = /^[ MADRCU?!]{2} ([\s\S]*)$/.exec(rec);
+      files.add(mm ? mm[1] : rec); // 리네임의 원경로 토큰은 XY 접두 없음 → 통째로 (존재 안 하면 스킵)
     }
   }
 
   const findings = [];
-  let checked = 0;
+  // 파일명 검사는 전 파일 대상 — I/O 없이 싸고, 개수 상한에 걸려 .env 류가 새면 안 된다 (감사 #2)
   for (const f of files) {
-    if (checked >= MAX_FILES) break;
     for (const rule of FORBIDDEN_FILES) {
       if (rule.re.test(f)) findings.push(`${f} — ${rule.why}`);
     }
+  }
+  // 내용 검사만 개수 상한 적용 (readFileSync가 I/O 비용)
+  let checked = 0;
+  for (const f of files) {
+    if (checked >= MAX_FILES) break;
     const p = path.join(cwd, f);
     let st;
     try { st = fs.statSync(p); } catch { continue; }
-    if (!st.isFile() || st.size > MAX_BYTES) continue;
+    if (!st.isFile()) continue;
     checked += 1;
     let content;
-    try { content = fs.readFileSync(p, 'utf8'); } catch { continue; }
-    if (content.includes('\0')) continue; // 바이너리 제외
+    try {
+      if (st.size > MAX_BYTES) {
+        // 1MB 초과 파일도 통째 스킵하지 않고 앞부분만 읽어 스캔한다 (감사 #4)
+        const fd = fs.openSync(p, 'r');
+        const buf = Buffer.alloc(MAX_BYTES);
+        const n = fs.readSync(fd, buf, 0, MAX_BYTES, 0);
+        fs.closeSync(fd);
+        content = buf.subarray(0, n).toString('utf8');
+      } else {
+        content = fs.readFileSync(p, 'utf8');
+      }
+    } catch { continue; }
+    // 바이너리 판별: 제어문자(탭·개행 제외) 비율이 높으면 진짜 바이너리로 보고 스킵.
+    // 산발적 널바이트(텍스트에 1~2개 주입)는 제거 후 스캔한다 — 널바이트 1개로 전체 스캔을
+    // 무력화하던 우회 차단 (감사 #1). 밀도가 아니라 인쇄가능 비율로 판정해 짧은 파일 오판을 막는다.
+    const nonText = (content.match(/[\x00-\x08\x0e-\x1f]/g) || []).length;
+    if (content.length && nonText / content.length > 0.3) continue; // 진짜 바이너리
+    if (content.includes('\0')) content = content.replace(/\0/g, '');
     for (const [re, label] of SECRET_PATTERNS) {
       if (re.test(content)) findings.push(`${f} — ${label} 패턴 발견`);
     }

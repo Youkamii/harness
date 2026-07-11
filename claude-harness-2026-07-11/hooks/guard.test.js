@@ -43,6 +43,58 @@ const cases = [
   // 리뷰 발견 #6: 브랜치명 오탐/목적지 판별
   ['git push --force origin main-backup', 'warn'],
   ['git push -f origin dev:main', 'deny'],
+  // ── Phase 2 C1 적대 감사 (크로스벤더 red-review 재현본) ──
+  // find 기반 삭제 (rm 없이 루트/홈 전멸)
+  ['find / -delete', 'deny'],
+  ['find ~ -delete', 'deny'],
+  ['find / -exec rm {} +', 'deny'],
+  ['find /home/gkfkd -delete', 'deny'],
+  ['find . -name "*.tmp" -delete', 'warn'],
+  ['find . -delete', 'warn'],
+  ['find node_modules -type f -delete', 'warn'],
+  // 중괄호 변수 우회
+  ['rm -rf ${HOME}', 'deny'],
+  ['rm -rf ${HOME}/', 'deny'],
+  ['rm -rf ${env:USERPROFILE}', 'deny'],
+  // 시스템 디렉터리 glob·심층 경로
+  ['rm -rf /etc/*', 'deny'],
+  ['rm -rf /home/*', 'deny'],
+  ['rm -rf /usr/local', 'deny'],
+  ['rm -rf /home/gkfkd', 'deny'],
+  ['rm -rf /var/lib/xyz', 'deny'],
+  ['rm -rf /tmp/xyz', 'warn'],
+  // 상대경로 루트 등반 (4단계 이상)
+  ['rm -rf ../../../../', 'deny'],
+  ['rm -rf ../../../../etc', 'deny'],
+  ['rm -rf ../build', 'warn'],
+  ['rm -rf ../../node_modules', 'warn'],
+  // PowerShell 삭제 별칭 + 플래그 약어
+  ['del -Recurse -Force C:\\', 'deny'],
+  ['ri -Recurse -Force C:\\', 'deny'],
+  ['rd C:\\Users\\gkfkd -Recurse -Force', 'deny'],
+  ['Remove-Item -Rec -Force C:\\', 'deny'],
+  ['Remove-Item C:\\ -rec -force', 'deny'],
+  ['del old.txt', 'none'],
+  ['ri notes.md', 'none'],
+  // .NET 직접 삭제
+  ['[System.IO.Directory]::Delete("C:\\", $true)', 'deny'],
+  // full-ref 강제 푸시
+  ['git push --force origin HEAD:refs/heads/main', 'deny'],
+  ['git push origin +refs/heads/main', 'deny'],
+  ['git push --force origin dev:refs/heads/master', 'deny'],
+  ['git push -f origin HEAD:refs/heads/feature', 'warn'],
+  // 디바이스 직접 쓰기 (dd 없이)
+  ['cat /dev/zero > /dev/sda', 'deny'],
+  ['echo x > /dev/nvme0n1', 'deny'],
+  ['echo done > /dev/null', 'none'],
+  ['npm test 2> /dev/null', 'none'],
+  // Windows 포맷
+  ['Format-Volume -DriveLetter C', 'deny'],
+  ['format C:', 'deny'],
+  // 디스크 파괴 도구
+  ['shred -uz /dev/sda', 'deny'],
+  ['shred -u secret.txt', 'warn'],
+  ['truncate -s 0 prod.db', 'warn'],
 ];
 let fail = 0;
 for (const [cmd, expect] of cases) {

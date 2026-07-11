@@ -77,6 +77,60 @@ check('.env 파일 차단', r.status === 2 && r.stderr.includes('.env') && !r.st
 r = run('ls -la', r4);
 check('무관 명령 통과', r.status === 0 && !r.stderr, `status=${r.status}`);
 
+// ── Phase 2 C2 강화 (크로스벤더 red-review 재현본) ──
+// 7. 널바이트 삽입으로 스캔 무력화 시도 차단 (감사 #1)
+const r7 = mkrepo(); dirs.push(r7);
+fs.writeFileSync(path.join(r7, 'note.txt'), `x=${FAKE_AWS}\0trailing\n`);
+git(r7, 'add', '.');
+r = run('git commit -m x', r7);
+check('널바이트 삽입해도 AWS 키 탐지', r.status === 2, `status=${r.status}`);
+
+// 8. Stripe 라이브 키 (감사 #5)
+const FAKE_STRIPE = 'sk' + '_live_' + 'a'.repeat(24);
+const r8 = mkrepo(); dirs.push(r8);
+fs.writeFileSync(path.join(r8, 'pay.js'), `const k = "${FAKE_STRIPE}"\n`);
+git(r8, 'add', '.');
+r = run('git commit -m x', r8);
+check('Stripe 라이브 키 차단', r.status === 2, `status=${r.status}`);
+
+// 9. GitLab PAT (감사 #6)
+const FAKE_GLPAT = 'glpat' + '-' + 'A'.repeat(20);
+const r9 = mkrepo(); dirs.push(r9);
+fs.writeFileSync(path.join(r9, 'ci.yml'), `token: ${FAKE_GLPAT}\n`);
+git(r9, 'add', '.');
+r = run('git commit -m x', r9);
+check('GitLab PAT 차단', r.status === 2, `status=${r.status}`);
+
+// 10. 무따옴표 하드코딩 비밀 (감사 #7). 소스 자기오탐 방지로 값은 조립 + 파일에만 실제 기록
+const SECRET_VAL = 'super' + 'secret' + 'value' + '123';
+const r10 = mkrepo(); dirs.push(r10);
+fs.writeFileSync(path.join(r10, 'app.yaml'), `password: ${SECRET_VAL}\n`);
+git(r10, 'add', '.');
+r = run('git commit -m x', r10);
+check('무따옴표 password 차단', r.status === 2, `status=${r.status}`);
+
+// 11. 플레이스홀더는 오탐 안 함 (env 참조·changeme·your- 류)
+const r11 = mkrepo(); dirs.push(r11);
+fs.writeFileSync(path.join(r11, 'sample.yaml'), `password: \${DB_PASSWORD}\nsecret: changeme\napi_key: your-key-here\n`);
+git(r11, 'add', '.');
+r = run('git commit -m x', r11);
+check('플레이스홀더 통과', r.status === 0, `status=${r.status} stderr=${r.stderr}`);
+
+// 12. 대용량 파일(1MB 초과) 앞부분 비밀 (감사 #4)
+const r12 = mkrepo(); dirs.push(r12);
+fs.writeFileSync(path.join(r12, 'big.log'), `key=${FAKE_AWS}\n` + 'x'.repeat(1024 * 1024 + 10));
+git(r12, 'add', '.');
+r = run('git commit -m x', r12);
+check('대용량 파일 앞부분 비밀 탐지', r.status === 2, `status=${r.status}`);
+
+// 13. DB 커넥션 스트링 내 암호 (감사 #6). 소스 자기오탐 방지로 스킴 분리 조립
+const DB_URL = 'postgres' + '://admin:' + 'pwlongsecret99' + '@db.host:5432/app';
+const r13 = mkrepo(); dirs.push(r13);
+fs.writeFileSync(path.join(r13, 'db.txt'), DB_URL + '\n');
+git(r13, 'add', '.');
+r = run('git commit -m x', r13);
+check('DB 커넥션 암호 차단', r.status === 2, `status=${r.status}`);
+
 for (const d of dirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 console.log(fail === 0 ? '\nALL PASS' : `\n${fail} FAILURES`);
 process.exit(fail === 0 ? 0 : 1);
