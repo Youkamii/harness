@@ -95,6 +95,35 @@ const cases = [
   ['shred -uz /dev/sda', 'deny'],
   ['shred -u secret.txt', 'warn'],
   ['truncate -s 0 prod.db', 'warn'],
+  // ── 새 터미널 창 금지 (2026-07-17 사용자 지시 — 이슈 #12) ──
+  // 터미널 에뮬레이터를 새 창으로 여는 명령은 deny
+  ['Start-Process cmd', 'deny'],
+  ['Start-Process powershell -ArgumentList "-File a.ps1"', 'deny'],
+  ['Start-Process pwsh -Verb RunAs', 'deny'],
+  ['Start-Process wt', 'deny'],
+  ['Start-Process -FilePath cmd.exe', 'deny'],
+  ['start powershell', 'deny'],
+  ['start cmd /k "npm run dev"', 'deny'],
+  ['cmd /c start cmd', 'deny'],
+  ['start /min powershell -File x.ps1', 'deny'],
+  ['wt new-tab -d .', 'deny'],
+  ['wt', 'deny'],
+  ['saps pwsh', 'deny'],
+  // 숨김 플래그가 있으면 창이 안 뜨므로 통과
+  ['Start-Process node -NoNewWindow -Wait', 'none'],
+  ['Start-Process myapp -WindowStyle Hidden', 'none'],
+  // 그 외 Start-Process/start 별칭은 warn (콘솔 앱이면 창이 뜬다)
+  ['Start-Process notepad', 'warn'],
+  ['Start-Process node -ArgumentList "server.js"', 'warn'],
+  ['start https://example.com', 'warn'],
+  ['start .', 'warn'],
+  // 오탐 금지: start가 다른 도구의 서브커맨드/단어 일부인 경우
+  ['npm start', 'none'],
+  ['docker start mycontainer', 'none'],
+  ['systemctl start nginx', 'none'],
+  ['pm2 start app.js', 'none'],
+  ['git config --get alias.restart', 'none'],
+  ['echo wt-report.txt', 'none'],
 ];
 let fail = 0;
 for (const [cmd, expect] of cases) {

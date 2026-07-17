@@ -95,6 +95,21 @@ process.stdin.on('end', () => {
   }
   if (/\btruncate\b/.test(cmd) && /-s\s*0\b/.test(cmd)) warn('[guard] truncate -s 0 — 파일 내용이 비워진다.');
 
+  // ── 새 터미널/콘솔 창 금지 (2026-07-17 사용자 지시, #12) ──
+  // 모델의 한계: 작업 중 Start-Process·start로 새 콘솔 창을 띄워 사용자 화면을 어지럽힌다.
+  // 터미널 에뮬레이터(cmd/powershell/pwsh/wt/conhost)를 새 창으로 여는 형태는 deny,
+  // 그 외 Start-Process/start 별칭은 warn(콘솔 앱이면 창이 뜬다). 숨김 플래그가 있으면 창이 없으므로 무개입.
+  const HIDDEN_WINDOW = /-NoNewWindow\b|-WindowStyle\s+Hidden\b/i;
+  const START_TERM =
+    /\b(?:Start-Process|saps)\b[^;|&]*?\b(cmd|powershell|pwsh|wt|conhost)(\.exe)?\b|\bstart(\.exe)?\s+(\/\w+\s+)*["']?(cmd|powershell|pwsh|wt|conhost)(\.exe)?\b/i;
+  const WT_LAUNCH = /(^|[;&|]\s*)wt(\.exe)?(\s|$)/i; // Windows Terminal 열기 (wt-report.txt 같은 단어 일부는 제외)
+  if (!HIDDEN_WINDOW.test(cmd)) {
+    if (START_TERM.test(cmd) || WT_LAUNCH.test(cmd))
+      deny('[guard] 새 터미널 창 실행 차단 — 창을 띄우지 말고 현재 세션에서 직접 실행하라 (백그라운드는 run_in_background)');
+    if (/\b(Start-Process|saps)\b/i.test(cmd) || /(^|[;&|]\s*)start(\.exe)?\s/i.test(cmd))
+      warn('[guard] Start-Process/start는 콘솔 앱이면 새 창을 띄운다 — 직접 실행하거나 -NoNewWindow·-WindowStyle Hidden을 쓰고, 화면에 창을 띄우지 마라.');
+  }
+
   // git push 강제 (해당 명령 구간만 검사해 오탐 축소)
   const pushIdx = cmd.search(/\bgit\s+push\b/);
   if (pushIdx >= 0) {
