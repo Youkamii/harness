@@ -50,8 +50,11 @@ if (fs.existsSync(dest) && !fs.readFileSync(dest, 'utf8').includes(MARKER)) {
 }
 
 const template = fs.readFileSync(path.join(REPO, 'templates', 'pre-commit'), 'utf8');
-// sh 문자열 안에 들어가므로 백슬래시는 슬래시로 (Git Bash sh는 슬래시 경로를 그대로 이해한다)
-const body = template.replace('{{GUARD_PATH}}', guardPath.replace(/\\/g, '/'));
+// sh 이중따옴표 문자열 안에 들어간다: 백슬래시는 슬래시로(Git Bash sh가 그대로 이해),
+// $·백틱·따옴표는 이스케이프 — 경로에 $가 있으면 sh 변수 확장으로 GUARD가 빈 경로가 되어
+// 비밀 검사가 조용히 무력화된다 (red-review S3).
+const shSafe = guardPath.replace(/\\/g, '/').replace(/([$`"])/g, '\\$1');
+const body = template.replace('{{GUARD_PATH}}', shSafe);
 fs.mkdirSync(hooksDir, { recursive: true });
 fs.writeFileSync(dest, body, { mode: 0o755 });
 console.log(`[precommit] 설치 완료: ${dest}`);

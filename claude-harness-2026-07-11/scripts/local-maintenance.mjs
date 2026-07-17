@@ -6,15 +6,36 @@
 // 하는 일:
 //   ① 훅 회귀 테스트 (guard·secrets·format) — 배포된 안전장치가 여전히 작동하는지
 //   ② install --verify — 소스↔배포본 드리프트·잔존 자산 검사
-//   ③ memory-audit — 메모리 링크·인덱스·frontmatter 정합
+//   ③ memory-audit — 전 프로젝트 메모리 링크·인덱스·frontmatter 정합
 // 이상이 있을 때만 비0 종료 + 요약 출력. 조용한 성공은 예약 작업 로그를 더럽히지 않는다.
+//
+// 로그: 예약 작업은 창 없이 돌므로(run-hidden.vbs) 콘솔이 없다 — 출력 전체를
+// %LOCALAPPDATA%\g-harness\maintenance.log 에 직접 append 한다 (red-review S1·M4:
+// cmd 리다이렉트 체인을 없애기 위해 파일 기록은 여기가 담당).
 import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const node = process.execPath;
 const problems = [];
+const lines = [];
+const say = (msg, isErr = false) => {
+  lines.push(msg);
+  (isErr ? console.error : console.log)(msg);
+};
+const flushLog = () => {
+  const base = process.env.LOCALAPPDATA;
+  if (!base) return;
+  try {
+    const dir = path.join(base, 'g-harness');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, 'maintenance.log'), lines.join('\n') + '\n');
+  } catch {
+    /* 로그 실패가 점검 자체를 막으면 안 된다 */
+  }
+};
 
 function step(label, argvRel) {
   const r = spawnSync(node, argvRel.map((a) => (a.startsWith('--') ? a : path.join(REPO, ...a.split('/')))), {
@@ -29,7 +50,7 @@ function step(label, argvRel) {
   return r.status === 0;
 }
 
-console.log(`[maintenance] ${new Date().toISOString?.() || ''} 로컬 점검 시작`);
+say(`[maintenance] ${new Date().toISOString?.() || ''} 로컬 점검 시작`);
 step('훅: guard', ['hooks/guard.test.js']);
 step('훅: secrets', ['hooks/secrets-guard.test.mjs']);
 step('훅: format-changed', ['hooks/format-changed.test.mjs']);
@@ -37,9 +58,11 @@ step('드리프트: install --verify', ['install.mjs', '--verify']);
 step('메모리 정합', ['scripts/memory-audit.mjs']);
 
 if (problems.length) {
-  console.error('[maintenance] 점검 실패 — 조치 필요:');
-  for (const p of problems) console.error(`  ✗ ${p}`);
+  say('[maintenance] 점검 실패 — 조치 필요:', true);
+  for (const p of problems) say(`  ✗ ${p}`, true);
+  flushLog();
   process.exit(1);
 }
-console.log('[maintenance] 전 항목 정상 (훅·드리프트·메모리)');
+say('[maintenance] 전 항목 정상 (훅·드리프트·메모리)');
+flushLog();
 process.exit(0);

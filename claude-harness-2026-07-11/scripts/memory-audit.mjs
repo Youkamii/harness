@@ -115,49 +115,85 @@ function report({ errors, candidates }, indent = '') {
   }
 }
 
-function main() {
-  const argv = process.argv.slice(2);
+// auditDir을 크래시로부터 격리 — memory가 파일이거나 읽기 실패해도 순회 전체가 죽지 않고
+// 해당 대상만 오류 1건으로 기록한다 (red-review C5②: ENOTDIR가 나머지 프로젝트 감사를 전멸시켰다)
+function safeAudit(dir) {
+  try {
+    if (!fs.statSync(dir).isDirectory()) return { count: 0, errors: ['memory가 디렉터리가 아님(파일)'], candidates: [] };
+    return auditDir(dir);
+  } catch (e) {
+    return { count: 0, errors: [`감사 불가: ${e.message}`], candidates: [] };
+  }
+}
 
-  // 단일 디렉터리 모드 (기존 계약 유지)
-  const single = argv.find((a) => !a.startsWith('--'));
-  const projIdx = argv.indexOf('--projects');
-  if (single && projIdx < 0) {
+// 인자 규약: <dir> = 단일 디렉터리, --projects <root> 또는 --projects=<root> = 순회 루트.
+// 동시 지정·미지원 옵션은 조용히 무시하지 않고 즉시 오류로 (red-review C5①:
+// --projects=등호형이 무시되면 테스트용 오버라이드가 실사용자 데이터 순회로 둔갑한다).
+function parseArgs(argv) {
+  let single = null;
+  let projects = null;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--projects') projects = argv[++i];
+    else if (a.startsWith('--projects=')) projects = a.slice('--projects='.length);
+    else if (a.startsWith('--')) {
+      console.error(`[memory-audit] 알 수 없는 옵션: ${a}`);
+      process.exit(1);
+    } else if (single === null) single = a;
+    else {
+      console.error('[memory-audit] 디렉터리 인자는 하나만 지정할 수 있습니다.');
+      process.exit(1);
+    }
+  }
+  if (single && projects !== null) {
+    console.error('[memory-audit] <dir>와 --projects는 동시에 쓸 수 없습니다.');
+    process.exit(1);
+  }
+  if (projects !== null && !projects) {
+    console.error('[memory-audit] --projects 값이 비었습니다.');
+    process.exit(1);
+  }
+  return { single, projects };
+}
+
+function main() {
+  const { single, projects } = parseArgs(process.argv.slice(2));
+
+  // 단일/순회를 같은 순회 루프 하나로 처리한다 (red-review M5: 이중 구현 제거)
+  let targets;
+  let header;
+  if (single) {
     if (!fs.existsSync(single)) {
       console.error(`[memory-audit] 디렉터리 없음: ${single}`);
       process.exit(1);
     }
-    const r = auditDir(single);
-    console.log(`[memory-audit] 대상 ${r.count}개 메모리 @ ${single}\n`);
-    report(r);
-    process.exit(r.errors.length ? 1 : 0);
+    targets = [{ slug: single, dir: single }];
+    header = `[memory-audit] 단일 디렉터리 감사`;
+  } else {
+    const root = projects || path.join(os.homedir(), '.claude', 'projects');
+    if (!fs.existsSync(root)) {
+      console.error(`[memory-audit] projects 루트 없음: ${root}`);
+      process.exit(1);
+    }
+    targets = fs
+      .readdirSync(root, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => ({ slug: e.name, dir: path.join(root, e.name, 'memory') }))
+      .filter((t) => fs.existsSync(t.dir));
+    header = `[memory-audit] 프로젝트 순회 @ ${root} — memory 있는 프로젝트 ${targets.length}개`;
   }
 
-  // 전 프로젝트 순회 모드 (#14): projects/*/memory 전부
-  const root =
-    projIdx >= 0 ? argv[projIdx + 1] : path.join(os.homedir(), '.claude', 'projects');
-  if (!root || !fs.existsSync(root)) {
-    console.error(`[memory-audit] projects 루트 없음: ${root}`);
-    process.exit(1);
-  }
-  const targets = fs
-    .readdirSync(root, { withFileTypes: true })
-    .filter((e) => e.isDirectory())
-    .map((e) => ({ slug: e.name, dir: path.join(root, e.name, 'memory') }))
-    .filter((t) => fs.existsSync(t.dir));
-
-  console.log(`[memory-audit] 프로젝트 순회 @ ${root} — memory 있는 프로젝트 ${targets.length}개\n`);
+  console.log(header + '\n');
   let totalErrors = 0;
   let totalCandidates = 0;
   for (const t of targets) {
-    const r = auditDir(t.dir);
+    const r = safeAudit(t.dir);
     console.log(`── ${t.slug} (${r.count}개)`);
     report(r, '  ');
     totalErrors += r.errors.length;
     totalCandidates += r.candidates.length;
   }
-  console.log(
-    `\n총괄: 프로젝트 ${targets.length}개 — 결정론 오류 ${totalErrors}건, 노후 후보 ${totalCandidates}건`
-  );
+  console.log(`\n총괄: 대상 ${targets.length}개 — 결정론 오류 ${totalErrors}건, 노후 후보 ${totalCandidates}건`);
   process.exit(totalErrors ? 1 : 0);
 }
 

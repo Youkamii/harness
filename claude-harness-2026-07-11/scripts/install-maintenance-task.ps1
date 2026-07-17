@@ -18,13 +18,12 @@ $taskName = "g-harness-maintenance"
 if (-not (Test-Path $script)) { throw "local-maintenance.mjs 없음: $script" }
 if (-not (Test-Path $vbs)) { throw "run-hidden.vbs 없음: $vbs" }
 
-# 로그: 매 실행의 출력을 파일로 (창이 없으므로 파일이 유일한 관측 수단)
-$logDir = Join-Path $env:LOCALAPPDATA "g-harness"
-if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
-$log = Join-Path $logDir "maintenance.log"
+# 로그: local-maintenance.mjs가 직접 %LOCALAPPDATA%\g-harness\maintenance.log 에 기록한다
+# (red-review S1·M4 — cmd 리다이렉트 체인 제거. 창이 없으므로 파일이 유일한 관측 수단).
+$log = Join-Path (Join-Path $env:LOCALAPPDATA "g-harness") "maintenance.log"
 
 # wscript //B: 스크립트 오류 팝업도 억제 (배치 모드). vbs가 node를 숨김 창으로 실행하고 종료 코드를 전달.
-$argLine = "//B //Nologo `"$vbs`" `"$node`" `"$script`" >> `"$log`" 2>&1"
+$argLine = "//B //Nologo `"$vbs`" `"$node`" `"$script`""
 $action  = New-ScheduledTaskAction -Execute $wscript -Argument $argLine -WorkingDirectory $repo
 # 매주 월요일 오전 9시. 토큰 안 쓰는 작업이라 시간대 부담 없음.
 $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday -At 9am

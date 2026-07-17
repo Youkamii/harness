@@ -32,16 +32,24 @@ process.stdin.on('end', () => {
   };
 
   // 중위험: 실행을 막지 않고 모델에게만 경고를 주입한다. 사용자에게 묻지 않는다.
+  // 경고는 누적했다가 마지막에 한 번에 출력한다 — warn이 즉시 종료하면 같은 명령 뒤쪽의
+  // 재앙급 deny(`rm -rf build && git push --force origin main`)를 가린다 (red-review C1, 회귀였음).
+  const warns = [];
   const warn = (reason) => {
-    process.stdout.write(
-      JSON.stringify({
-        suppressOutput: true,
-        hookSpecificOutput: {
-          hookEventName: 'PreToolUse',
-          additionalContext: reason + ' 대상 경로/브랜치가 의도한 것이 맞는지 확인하고 진행하라.',
-        },
-      })
-    );
+    if (!warns.includes(reason)) warns.push(reason);
+  };
+  const finish = () => {
+    if (warns.length) {
+      process.stdout.write(
+        JSON.stringify({
+          suppressOutput: true,
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            additionalContext: warns.join(' ') + ' 대상 경로/브랜치가 의도한 것이 맞는지 확인하고 진행하라.',
+          },
+        })
+      );
+    }
     process.exit(0);
   };
 
@@ -95,18 +103,29 @@ process.stdin.on('end', () => {
   }
   if (/\btruncate\b/.test(cmd) && /-s\s*0\b/.test(cmd)) warn('[guard] truncate -s 0 — 파일 내용이 비워진다.');
 
-  // ── 새 터미널/콘솔 창 금지 (2026-07-17 사용자 지시, #12) ──
+  // ── 새 터미널/콘솔 창 금지 (2026-07-17 사용자 지시, #12 — red-review로 세그먼트 단위 재설계) ──
   // 모델의 한계: 작업 중 Start-Process·start로 새 콘솔 창을 띄워 사용자 화면을 어지럽힌다.
-  // 터미널 에뮬레이터(cmd/powershell/pwsh/wt/conhost)를 새 창으로 여는 형태는 deny,
-  // 그 외 Start-Process/start 별칭은 warn(콘솔 앱이면 창이 뜬다). 숨김 플래그가 있으면 창이 없으므로 무개입.
-  const HIDDEN_WINDOW = /-NoNewWindow\b|-WindowStyle\s+Hidden\b/i;
-  const START_TERM =
-    /\b(?:Start-Process|saps)\b[^;|&]*?\b(cmd|powershell|pwsh|wt|conhost)(\.exe)?\b|\bstart(\.exe)?\s+(\/\w+\s+)*["']?(cmd|powershell|pwsh|wt|conhost)(\.exe)?\b/i;
-  const WT_LAUNCH = /(^|[;&|]\s*)wt(\.exe)?(\s|$)/i; // Windows Terminal 열기 (wt-report.txt 같은 단어 일부는 제외)
-  if (!HIDDEN_WINDOW.test(cmd)) {
-    if (START_TERM.test(cmd) || WT_LAUNCH.test(cmd))
+  // 세그먼트(;&|·개행 분할) 단위로 판정한다: 숨김 플래그가 다른 하위 명령에 있다고 전체가
+  // 면제되면 안 되고(리뷰 C2), 인수·URL 속 단어(cmd.txt, …/powershell/…)로 오탐해도 안 된다(C4).
+  // 남는 한계(수용): 따옴표 경로("C:\...\cmd.exe") 실행, -ArgumentList 문자열 안의 숨김 플래그
+  // 오인 — 문자열 검사의 한계로, 헌법의 '새 터미널 창 금지' 규칙이 막는 영역.
+  const TERM = "(?:cmd|powershell|pwsh|wt|conhost)(?:\\.exe)?";
+  const CMDPOS = "(?:^|\\/[ck]\\s+)"; // 세그먼트 시작 또는 cmd /c·/k 뒤 = 명령 위치
+  const HIDDEN_WINDOW = /-NoNewWindow\b|-WindowStyle\s+Hidden\b|(^|\s)\/b(\s|$)/i; // /b = cmd start의 무창 실행
+  const PS_SPAWN = /\b(Start-Process|saps)\b/i;
+  const START_AT_CMDPOS = new RegExp(CMDPOS + "start(?:\\.exe)?(\\s|$)", "i");
+  // Start-Process 인수의 터미널 이름: 앞이 공백/따옴표/=, 뒤가 공백/따옴표/끝 — 경로·URL 조각 오탐 방지
+  const TERM_AFTER_PS = new RegExp("\\b(?:Start-Process|saps)\\b.*?[\\s\"'=]" + TERM + "(?=[\\s\"']|$)", "i");
+  // start 뒤 터미널: 첫 따옴표 인수는 창 제목(`start "" cmd` 관용구)이므로 건너뛴다 (리뷰 C3①)
+  const TERM_AFTER_START = new RegExp(CMDPOS + "start(?:\\.exe)?\\s+(?:\"[^\"]*\"\\s+)?(?:\\/\\w+\\s+)*[\"']?" + TERM + "\\b", "i");
+  const WT_AT_CMDPOS = new RegExp(CMDPOS + "wt(?:\\.exe)?(\\s|$)", "i"); // cmd /c wt·개행 뒤 wt 포함 (C3③/S4)
+  const BARE_START = new RegExp(CMDPOS + "start(?:\\.exe)?\\s*$", "i"); // 맨몸 start = 새 cmd 창 (C3②)
+  for (const rawSeg of cmd.split(/[;&|\n]+/)) {
+    const seg = rawSeg.trim();
+    if (!seg || HIDDEN_WINDOW.test(seg)) continue; // 이 세그먼트는 창을 만들지 않는다
+    if (TERM_AFTER_PS.test(seg) || TERM_AFTER_START.test(seg) || WT_AT_CMDPOS.test(seg) || BARE_START.test(seg))
       deny('[guard] 새 터미널 창 실행 차단 — 창을 띄우지 말고 현재 세션에서 직접 실행하라 (백그라운드는 run_in_background)');
-    if (/\b(Start-Process|saps)\b/i.test(cmd) || /(^|[;&|]\s*)start(\.exe)?\s/i.test(cmd))
+    if (PS_SPAWN.test(seg) || START_AT_CMDPOS.test(seg))
       warn('[guard] Start-Process/start는 콘솔 앱이면 새 창을 띄운다 — 직접 실행하거나 -NoNewWindow·-WindowStyle Hidden을 쓰고, 화면에 창을 띄우지 마라.');
   }
 
@@ -130,5 +149,5 @@ process.stdin.on('end', () => {
   if (/\bgit\s+clean\b/.test(cmd) && /(^|\s)-[a-zA-Z]*f[a-zA-Z]*(\s|$)/.test(cmd))
     warn('[guard] git clean -f — 추적 안 된 파일이 삭제된다.');
 
-  process.exit(0); // 판단 없음
+  finish(); // 누적된 경고가 있으면 출력하고 종료 (없으면 무개입)
 });

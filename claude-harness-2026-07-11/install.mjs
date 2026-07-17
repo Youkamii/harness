@@ -9,7 +9,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { buildManifest, verifyDeployed, findStaleDeployed, MANIFEST_FILE } from './scripts/manifest-lib.mjs';
+import { buildManifest, verifyDeployed, findStaleDeployed, MANIFEST_FILE, walk } from './scripts/manifest-lib.mjs';
 
 const REPO = path.dirname(fileURLToPath(import.meta.url));
 const CLAUDE = path.join(os.homedir(), '.claude');
@@ -29,24 +29,20 @@ if (process.argv.includes('--verify')) {
   process.exit(0);
 }
 
-// ① 깨진 자산을 배포하지 않는다 — 테스트 실패 시 설치 중단 (소스 트리 무변경 상태에서 판정)
-for (const test of [
-  'hooks/guard.test.js',
-  'hooks/secrets-guard.test.mjs',
-  'hooks/format-changed.test.mjs',
-  'contracts/contracts.test.mjs',
-  'test/smoke.test.mjs',
-  'test/constitution.test.mjs',
-  'test/memory-audit.test.mjs',
-  'test/precommit.test.mjs',
-]) {
-  const t = spawnSync(process.execPath, [path.join(REPO, ...test.split('/'))], { encoding: 'utf8' });
-  if (t.status !== 0) {
-    console.error(t.stdout || '', t.stderr || '');
-    console.error(`[install] ${test} 실패 — 배포를 중단합니다.`);
+// ① 깨진 자산을 배포하지 않는다 — 테스트 실패 시 설치 중단 (소스 트리 무변경 상태에서 판정).
+// 하드코딩 목록 대신 저장소의 모든 *.test.* 를 자동 발견한다 — 새 테스트를 추가하고 여기
+// 갱신을 잊으면 게이트가 그 테스트를 영영 건너뛴다 (red-review M3). 테스트 파일의 "존재"
+// 자체는 smoke REQUIRED가 강제한다 (walk는 있는 것을 돌릴 뿐 없어진 것을 눈치 못 챈다).
+const TESTS = [...walk(REPO)].filter((f) => /\.test\.(js|mjs)$/.test(f)).sort();
+for (const t of TESTS) {
+  const rel = path.relative(REPO, t).split(path.sep).join('/');
+  const r = spawnSync(process.execPath, [t], { encoding: 'utf8' });
+  if (r.status !== 0) {
+    console.error(r.stdout || '', r.stderr || '');
+    console.error(`[install] ${rel} 실패 — 배포를 중단합니다.`);
     process.exit(1);
   }
-  console.log(`[install] ${test} 통과`);
+  console.log(`[install] ${rel} 통과`);
 }
 
 // ② 잔존 자산 정리 — 소스에서 삭제된 자산이 배포본에서 계속 실행되는 것을 막는다.

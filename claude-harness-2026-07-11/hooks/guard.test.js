@@ -124,6 +124,27 @@ const cases = [
   ['pm2 start app.js', 'none'],
   ['git config --get alias.restart', 'none'],
   ['echo wt-report.txt', 'none'],
+  // ── red-review 반영 (2026-07-17: 마스킹 회귀 C1·세그먼트 게이트 C2·미탐 C3/S4·오탐 C4/M1) ──
+  // C1: warn이 조기 종료해 뒤쪽 deny를 가리면 안 된다 (warn은 누적, deny는 즉시)
+  ['start . && git push --force origin main', 'deny'],
+  ['del /s tmp & start cmd', 'deny'],
+  ['rm -rf build && git push -f origin main', 'deny'],
+  ['rm -rf build && git clean -fd', 'warn'],
+  // C2: 숨김 플래그 게이트는 명령 전체가 아니라 세그먼트 단위
+  ['Start-Process cmd; echo -NoNewWindow', 'deny'],
+  ['Start-Process app -WindowStyle Hidden; Start-Process powershell -File d.ps1', 'deny'],
+  // C3: 미탐 3종 — 창 제목 관용구, 맨몸 start(새 cmd 창), cmd /c wt·개행 뒤 wt
+  ['start "" cmd', 'deny'],
+  ['start "dev" powershell', 'deny'],
+  ['start', 'deny'],
+  ['cmd /c wt', 'deny'],
+  ['cd proj\nwt', 'deny'],
+  // C4/M1: 오탐 금지 — 인수 경로·URL 속 터미널 단어, 컨테이너 이름, /b 무창 실행
+  ['docker start powershell', 'none'],
+  ['systemctl start pwsh-service', 'none'],
+  ['Start-Process notepad C:\\temp\\cmd.txt', 'warn'],
+  ['Start-Process https://learn.microsoft.com/en-us/powershell/scripting', 'warn'],
+  ['start /b node server.js', 'none'],
 ];
 let fail = 0;
 for (const [cmd, expect] of cases) {

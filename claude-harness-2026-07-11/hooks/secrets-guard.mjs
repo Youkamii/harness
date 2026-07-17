@@ -77,9 +77,11 @@ process.stdin.on('end', () => {
     catch { return ''; }
   };
 
-  // 검사 대상: 이미 스테이징된 파일 + (같은 명령에서 스테이징될) 변경/신규 파일
+  // 검사 대상: 이미 스테이징된 파일 + (같은 명령에서 스테이징될) 변경/신규 파일.
+  // 삭제 스테이징(--diff-filter=d 제외)은 검사하지 않는다 — 커밋된 .env를 git rm으로
+  // 제거하는 정리 커밋까지 파일명 규칙으로 차단하면 유출 복구가 교착된다 (red-review C6).
   // git commit -a/-am/--all 도 add와 동급으로 작업 트리를 스캔한다 (리뷰 발견 #4)
-  const files = new Set(git('diff', '--cached', '--name-only').split('\n').filter(Boolean));
+  const files = new Set(git('diff', '--cached', '--name-only', '--diff-filter=d').split('\n').filter(Boolean));
   const hasAdd = /\bgit\b[^|;&]*\badd\b/.test(cmd);
   const commitAll =
     /\bgit\b[^|;&]*\bcommit\b/.test(cmd) && /(^|\s)(-[a-zA-Z]*a[a-zA-Z]*|--all)(\s|$)/.test(cmd);
@@ -88,8 +90,9 @@ process.stdin.on('end', () => {
     // -z(NUL 구분)로 읽어 비ASCII 파일명 C-quoting 파싱 실패를 피한다 (감사 렌즈외 지적)
     for (const rec of git('status', '--porcelain', '-z').split('\0')) {
       if (!rec) continue;
-      const mm = /^[ MADRCU?!]{2} ([\s\S]*)$/.exec(rec);
-      files.add(mm ? mm[1] : rec); // 리네임의 원경로 토큰은 XY 접두 없음 → 통째로 (존재 안 하면 스킵)
+      const mm = /^([ MADRCU?!]{2}) ([\s\S]*)$/.exec(rec);
+      if (mm && mm[1].includes('D')) continue; // 삭제 예정 파일은 검사 제외 (위와 동일 사유)
+      files.add(mm ? mm[2] : rec); // 리네임의 원경로 토큰은 XY 접두 없음 → 통째로 (존재 안 하면 스킵)
     }
   }
 

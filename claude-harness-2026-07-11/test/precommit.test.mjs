@@ -55,9 +55,47 @@ function mkRepo() {
   const c2 = sh('git', ['commit', '-m', 'ok'], d);
   check('정상 파일 커밋 통과', c2.status === 0, c2.stderr);
 
-  // 4. 재설치는 멱등 (우리 마커 훅은 갱신)
-  const r2 = spawnSync(process.execPath, [INSTALLER, d, '--guard', GUARD], { encoding: 'utf8' });
-  check('재설치 멱등', r2.status === 0, r2.stderr);
+  // 4. 재설치는 멱등이고, 다른 guard 경로로 재설치하면 훅 내용이 실제로 갱신된다 (red-review M2b)
+  const guardCopy = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pc-g2-')), 'secrets-guard.mjs');
+  dirs.push(path.dirname(guardCopy));
+  fs.copyFileSync(GUARD, guardCopy);
+  const r2 = spawnSync(process.execPath, [INSTALLER, d, '--guard', guardCopy], { encoding: 'utf8' });
+  check(
+    '재설치 멱등 + 내용 갱신',
+    r2.status === 0 && fs.readFileSync(hook, 'utf8').includes(guardCopy.replace(/\\/g, '/')),
+    r2.stderr
+  );
+}
+
+// 4.5 fail-open: 설치 후 guard 파일이 사라지면(다른 기기 클론 상황) 커밋은 통과하되 stderr로 알린다 (red-review M2a·S5)
+{
+  const d = mkRepo();
+  const gdir = fs.mkdtempSync(path.join(os.tmpdir(), 'pc-gone-'));
+  dirs.push(gdir);
+  const gone = path.join(gdir, 'secrets-guard.mjs');
+  fs.copyFileSync(GUARD, gone);
+  spawnSync(process.execPath, [INSTALLER, d, '--guard', gone], { encoding: 'utf8' });
+  fs.rmSync(gone);
+  fs.writeFileSync(path.join(d, 'ok.txt'), 'hi\n');
+  sh('git', ['add', 'ok.txt'], d);
+  const c = sh('git', ['commit', '-m', 'ok'], d);
+  check('guard 부재 시 fail-open (커밋 통과)', c.status === 0, c.stderr);
+  check('fail-open이 무음이 아님 (stderr 고지)', (c.stderr + c.stdout).includes('생략'), c.stderr);
+}
+
+// 4.7 경로에 $가 있어도 sh 확장으로 무력화되지 않는다 (red-review S3)
+{
+  const d = mkRepo();
+  const gdir = fs.mkdtempSync(path.join(os.tmpdir(), 'pc-$var-'));
+  dirs.push(gdir);
+  const dollarGuard = path.join(gdir, 'secrets-guard.mjs');
+  fs.copyFileSync(GUARD, dollarGuard);
+  const ri = spawnSync(process.execPath, [INSTALLER, d, '--guard', dollarGuard], { encoding: 'utf8' });
+  check('$ 경로 설치 성공', ri.status === 0, ri.stderr);
+  fs.writeFileSync(path.join(d, '.env'), 'PLACEHOLDER=value\n');
+  sh('git', ['add', '-f', '.env'], d);
+  const c = sh('git', ['commit', '-m', 'secret'], d);
+  check('$ 경로 guard로도 .env 차단 (이스케이프 동작)', c.status !== 0, `status=${c.status} :: ${c.stderr}`);
 }
 
 // 5. 남의 pre-commit이 있으면 덮지 않고 중단한다

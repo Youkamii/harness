@@ -128,6 +128,34 @@ const dirs = [];
   write(p1, 'MEMORY.md', `- [A](a.md) — h\n`);
   const r = spawnSync(process.execPath, [AUDIT, '--projects', root], { encoding: 'utf8' });
   check('순회 전부 정합 → exit 0', r.status === 0, `status=${r.status}`);
+
+  // 11. --projects=<root> 등호형도 같은 결과 (red-review C5①: 조용한 무시 금지)
+  const r2 = spawnSync(process.execPath, [AUDIT, `--projects=${root}`], { encoding: 'utf8' });
+  check('--projects= 등호형 동작', r2.status === 0 && r2.stdout.includes('프로젝트 순회'), `status=${r2.status}`);
+}
+
+// 12. <dir>와 --projects 동시 지정 → 즉시 오류 (조용한 무시 금지)
+{
+  const d = mk(); dirs.push(d);
+  const r = spawnSync(process.execPath, [AUDIT, d, '--projects', d], { encoding: 'utf8' });
+  check('dir+--projects 동시 → exit 1', r.status === 1 && r.stderr.includes('동시'), `status=${r.status}`);
+}
+
+// 13. <slug>/memory가 파일이면 그 대상만 오류, 순회는 계속 (red-review C5②: ENOTDIR 전멸 방지)
+{
+  const root = mk(); dirs.push(root);
+  const good = path.join(root, 'p-ok', 'memory');
+  fs.mkdirSync(good, { recursive: true });
+  write(good, 'a.md', `---\nname: a\ndescription: d\nmetadata:\n  type: user\n---\n본문\n`);
+  write(good, 'MEMORY.md', `- [A](a.md) — h\n`);
+  fs.mkdirSync(path.join(root, 'p-file'));
+  fs.writeFileSync(path.join(root, 'p-file', 'memory'), 'memory라는 이름의 파일\n');
+  const r = spawnSync(process.execPath, [AUDIT, '--projects', root], { encoding: 'utf8' });
+  check(
+    'memory가 파일인 프로젝트 → 오류 기록 + 순회 지속',
+    r.status === 1 && r.stdout.includes('디렉터리가 아님') && r.stdout.includes('p-ok'),
+    `status=${r.status} out=${r.stdout.slice(0, 200)}`
+  );
 }
 
 for (const d of dirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }

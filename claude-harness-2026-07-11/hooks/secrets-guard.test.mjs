@@ -131,6 +131,26 @@ git(r13, 'add', '.');
 r = run('git commit -m x', r13);
 check('DB 커넥션 암호 차단', r.status === 2, `status=${r.status}`);
 
+// 14. 이미 커밋된 .env를 제거하는 정리 커밋은 차단하지 않는다 (red-review C6 — 유출 복구 교착 방지)
+const r14 = mkrepo(); dirs.push(r14);
+fs.writeFileSync(path.join(r14, '.env'), 'X=1\n');
+git(r14, 'add', '-f', '.env');
+git(r14, 'commit', '-qm', 'oops'); // 임시 레포엔 훅 미설치 — 실수 커밋 재현
+git(r14, 'rm', '-q', '.env');
+r = run('git commit -m "remove leaked env"', r14);
+check('.env 삭제(정리) 커밋 통과', r.status === 0, `status=${r.status} stderr=${r.stderr}`);
+
+// 15. 삭제와 신규 비밀이 섞이면 신규 쪽은 여전히 차단 (commit -am 경로)
+const r15 = mkrepo(); dirs.push(r15);
+fs.writeFileSync(path.join(r15, '.env'), 'X=1\n');
+fs.writeFileSync(path.join(r15, 'ok.txt'), 'clean\n');
+git(r15, 'add', '-f', '.');
+git(r15, 'commit', '-qm', 'init');
+git(r15, 'rm', '-q', '.env');
+fs.writeFileSync(path.join(r15, 'ok.txt'), `k = "${FAKE_AWS}"\n`);
+r = run('git commit -am cleanup', r15);
+check('삭제+신규비밀 혼합 시 신규는 차단', r.status === 2 && !r.stderr.includes('.env —'), `status=${r.status} stderr=${r.stderr}`);
+
 for (const d of dirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 console.log(fail === 0 ? '\nALL PASS' : `\n${fail} FAILURES`);
 process.exit(fail === 0 ? 0 : 1);
