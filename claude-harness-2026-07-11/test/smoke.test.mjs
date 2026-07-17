@@ -46,6 +46,8 @@ const REQUIRED = [
   'scripts/local-maintenance.mjs',
   'scripts/run-hidden.vbs',
   'scripts/install-maintenance-task.ps1',
+  'scripts/install-precommit.mjs',
+  'templates/pre-commit',
 ];
 for (const rel of REQUIRED) {
   check(`존재: ${rel}`, fs.existsSync(path.join(REPO, ...rel.split('/'))));

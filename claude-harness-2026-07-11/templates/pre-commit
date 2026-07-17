@@ -1,0 +1,13 @@
+#!/bin/sh
+# g-harness pre-commit — 래퍼 경유 커밋까지 잡는 저장소 레벨 비밀 검사 (#15)
+#
+# 존재 이유: PreToolUse secrets-guard 훅은 셸 도구의 '명령 문자열'만 보므로,
+# 스크립트 래퍼(npm run release, ./scripts/commit.sh 등) 내부의 git commit은 못 본다.
+# 이 훅은 git 자신이 실행하므로 어떤 경로로 커밋하든 발화한다. 제거: 이 파일을 지우면 끝.
+#
+# 스캔 로직은 secrets-guard.mjs를 그대로 재사용한다 (패턴 이중 유지보수 방지) —
+# stdin JSON 인터페이스가 "cwd 기준 staged 파일 스캔"이라 pre-commit 시점과 정확히 같다.
+GUARD="{{GUARD_PATH}}"
+command -v node >/dev/null 2>&1 || exit 0   # node 없는 환경(일부 GUI 클라이언트)은 통과 (fail-open)
+[ -f "$GUARD" ] || exit 0                   # 하네스 없는 클론(다른 기기)은 통과
+echo '{"tool_name":"Bash","tool_input":{"command":"git commit"}}' | node "$GUARD"

@@ -38,6 +38,7 @@ for (const test of [
   'test/smoke.test.mjs',
   'test/constitution.test.mjs',
   'test/memory-audit.test.mjs',
+  'test/precommit.test.mjs',
 ]) {
   const t = spawnSync(process.execPath, [path.join(REPO, ...test.split('/'))], { encoding: 'utf8' });
   if (t.status !== 0) {
