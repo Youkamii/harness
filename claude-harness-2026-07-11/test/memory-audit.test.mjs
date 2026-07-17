@@ -84,6 +84,52 @@ const dirs = [];
   check('노후 후보만 있으면 exit 0', r.status === 0 && r.stdout.includes('후보'), `status=${r.status}`);
 }
 
+// 8. 언더스코어 name 링크도 검사 대상 (kebab만 보면 사각지대 — #14)
+{
+  const d = mk(); dirs.push(d);
+  write(d, 'u1.md', `---\nname: snake_name\ndescription: d\nmetadata:\n  type: project\n---\n본문\n`);
+  write(d, 'u2.md', `---\nname: linker\ndescription: d\nmetadata:\n  type: feedback\n---\n산 링크 [[snake_name]], 죽은 링크 [[dead_snake]]\n`);
+  write(d, 'MEMORY.md', `- [1](u1.md) — h\n- [2](u2.md) — h\n`);
+  const r = run(d);
+  check(
+    '언더스코어 링크: 산 것 통과·죽은 것 검출 → exit 1',
+    r.status === 1 && r.stdout.includes('[[dead_snake]]') && !r.stdout.includes('[[snake_name]]'),
+    r.stdout
+  );
+}
+
+// 9. 전 프로젝트 순회 (--projects): 정합 p1 + 오류 p2 → exit 1, 둘 다 보고에 등장
+{
+  const root = mk(); dirs.push(root);
+  const p1 = path.join(root, 'proj-ok', 'memory');
+  const p2 = path.join(root, 'proj-bad', 'memory');
+  fs.mkdirSync(p1, { recursive: true });
+  fs.mkdirSync(p2, { recursive: true });
+  fs.mkdirSync(path.join(root, 'proj-no-memory')); // memory 없는 프로젝트는 조용히 스킵
+  write(p1, 'ok.md', `---\nname: ok\ndescription: d\nmetadata:\n  type: user\n---\n본문\n`);
+  write(p1, 'MEMORY.md', `- [OK](ok.md) — h\n`);
+  write(p2, 'bad.md', `---\nname: bad\ndescription: d\nmetadata:\n  type: project\n---\n[[nope]]\n`);
+  write(p2, 'MEMORY.md', `- [Bad](bad.md) — h\n`);
+  const r = spawnSync(process.execPath, [AUDIT, '--projects', root], { encoding: 'utf8' });
+  check(
+    '순회: 오류 있는 프로젝트가 하나면 exit 1 + 슬러그별 보고',
+    r.status === 1 && r.stdout.includes('proj-ok') && r.stdout.includes('proj-bad') && r.stdout.includes('죽은 링크'),
+    `status=${r.status} out=${r.stdout.slice(0, 300)}`
+  );
+  check('순회: memory 있는 프로젝트만 센다 (2개)', r.stdout.includes('프로젝트 2개'), r.stdout.split('\n')[0]);
+}
+
+// 10. 전부 정합한 순회 → exit 0
+{
+  const root = mk(); dirs.push(root);
+  const p1 = path.join(root, 'p1', 'memory');
+  fs.mkdirSync(p1, { recursive: true });
+  write(p1, 'a.md', `---\nname: a\ndescription: d\nmetadata:\n  type: user\n---\n본문\n`);
+  write(p1, 'MEMORY.md', `- [A](a.md) — h\n`);
+  const r = spawnSync(process.execPath, [AUDIT, '--projects', root], { encoding: 'utf8' });
+  check('순회 전부 정합 → exit 0', r.status === 0, `status=${r.status}`);
+}
+
 for (const d of dirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 console.log(fail === 0 ? '\nALL PASS' : `\n${fail} FAILURES`);
 process.exit(fail === 0 ? 0 : 1);
