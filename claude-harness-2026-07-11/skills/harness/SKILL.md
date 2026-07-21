@@ -13,7 +13,7 @@ description: 하네스 자기관리 — 구성 점검(훅 등록/테스트/파�
 1. 훅 등록 확인: `~/.claude/settings.json`의 hooks.PreToolUse에 guard.js·secrets-guard.mjs, hooks.PostToolUse에 format-changed.mjs 항목이 있고, command의 node 경로가 실존하는지.
 2. 통합 점검: `node <레포>/scripts/local-maintenance.mjs` — 훅 회귀 테스트 3종(guard·secrets·format) + 드리프트(install --verify) + 메모리 정합(memory-audit)을 한 번에 돈다. 개별 실행도 가능.
 3. **실발화 확인** (등록만 보고 넘어가지 않는다): 셸 툴로 `git push --force origin main`을 비레포 디렉터리에서 시도 — guard가 실행 전에 deny하면 배선 정상. 훅이 죽어 있으면 git 오류("not a repository")가 나온다.
-4. 파일 존재: `~/.claude/skills/{kickoff,red-review,wrapup,harness}`, `~/.claude/agents/{red-reviewer,verifier,scout}.md`, `~/.claude/hooks/{guard.js,secrets-guard.mjs,format-changed.mjs}`, `~/.claude/workflows/{red-review,deep-audit}.js`.
+4. 파일 존재: `~/.claude/skills/{kickoff,tough,red-review,wrapup,harness}`, `~/.claude/agents/{red-reviewer,verifier,scout}.md`, `~/.claude/hooks/{guard.js,secrets-guard.mjs,format-changed.mjs}`, `~/.claude/workflows/{red-review,deep-audit}.js`.
 5. 예약 작업 확인: `Get-ScheduledTask -TaskName g-harness-maintenance` — 없으면 `scripts/install-maintenance-task.ps1`로 등록 (wscript 숨김 실행 — 콘솔 창을 띄우면 안 된다).
 
 ## 구성 요소 추가/수정

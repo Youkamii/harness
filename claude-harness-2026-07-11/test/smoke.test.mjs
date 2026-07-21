@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { walk } from '../scripts/manifest-lib.mjs';
+import { buildManifest, walk } from '../scripts/manifest-lib.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0;
@@ -39,8 +39,10 @@ const REQUIRED = [
   'agents/scout.md',
   'skills/harness/SKILL.md',
   'skills/kickoff/SKILL.md',
+  'skills/tough/SKILL.md',
   'skills/red-review/SKILL.md',
   'skills/wrapup/SKILL.md',
+  'test/tough.test.mjs',
   'scripts/manifest-lib.mjs',
   'scripts/memory-audit.mjs',
   'scripts/local-maintenance.mjs',
@@ -52,6 +54,11 @@ const REQUIRED = [
 for (const rel of REQUIRED) {
   check(`존재: ${rel}`, fs.existsSync(path.join(REPO, ...rel.split('/'))));
 }
+const manifest = buildManifest(REPO);
+check(
+  '설치 manifest가 tough 스킬을 자동 수집한다',
+  typeof manifest.assets['skills/tough/SKILL.md'] === 'string',
+);
 
 console.log('[2] 모든 JS/MJS가 문법 오류 없이 파싱된다');
 const jsFiles = [...walk(REPO)].filter((f) => /\.(js|mjs)$/.test(f));
