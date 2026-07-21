@@ -1,5 +1,6 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { effectiveRunMode } from "./domain.js";
 import { sha256 } from "./hash.js";
 import { beginEffect, completeEffect, setTaskIssue, transitionRun } from "./operations.js";
 import { boundedRemoteText, githubControllerEnvironment } from "./redact.js";
@@ -81,21 +82,7 @@ async function listIssues(repoRoot, repository, runId) {
 }
 async function createIssue(store, state, task, repo, marker, effectId) {
     const ordinal = state.tasks.findIndex((candidate) => candidate.id === task.id) + 1;
-    const body = [
-        marker,
-        "",
-        "## Goal",
-        boundedRemoteText(state.goal, repo.isPrivate ? 1_500 : 500),
-        "",
-        "## Local task reference",
-        `- Task ${ordinal} of ${state.tasks.length}`,
-        `- Acceptance criteria: ${task.acceptanceCriteria.length} (details remain in the local tamper-evident ledger)`,
-        "",
-        "## Harness metadata",
-        `- Run: ${state.id}`,
-        `- Lane: ${state.lane}`,
-        "- Completion requires current-tree verification and independent adversarial review.",
-    ].join("\n");
+    const body = renderTaskIssueBody(state, task, repo.isPrivate);
     const outbox = path.join(store.root, "outbox");
     await mkdir(outbox, { recursive: true, mode: 0o700 });
     const bodyFile = path.join(outbox, `${effectId}.issue.md`);
@@ -132,6 +119,25 @@ async function createIssue(store, state, task, repo, marker, effectId) {
     finally {
         await rm(bodyFile, { force: true });
     }
+}
+export function renderTaskIssueBody(state, task, isPrivate) {
+    const ordinal = state.tasks.findIndex((candidate) => candidate.id === task.id) + 1;
+    return [
+        markerFor(state.id, task.id),
+        "",
+        "## Goal",
+        boundedRemoteText(state.goal, isPrivate ? 1_500 : 500),
+        "",
+        "## Local task reference",
+        `- Task ${ordinal} of ${state.tasks.length}`,
+        `- Acceptance criteria: ${task.acceptanceCriteria.length} (details remain in the local tamper-evident ledger)`,
+        "",
+        "## Harness metadata",
+        `- Run: ${state.id}`,
+        `- Lane: ${state.lane}`,
+        `- Mode: ${effectiveRunMode(state)}`,
+        "- Completion requires current-tree verification and independent adversarial review.",
+    ].join("\n");
 }
 function normalizeIssue(issue, marker) {
     return {

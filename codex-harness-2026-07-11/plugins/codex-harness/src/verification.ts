@@ -1,7 +1,7 @@
 import { mkdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import type { CommandSpec, HarnessTask, ReviewFinding, RunState } from "./domain.js";
-import { currentConfigHash } from "./domain.js";
+import { currentConfigHash, effectiveRunMode } from "./domain.js";
 import { resolveCodexExecutable } from "./executables.js";
 import { reviewTask } from "./autonomy.js";
 import { addEvidence, setTaskStatus } from "./operations.js";
@@ -185,7 +185,12 @@ export async function reviewAndRecordTask(
     taskId,
     reviewer: "acceptance-auditor",
     findings: acceptanceFindings,
-    summary: `Acceptance verdict: ${result.acceptance.verdict}`,
+    summary: reviewEvidenceSummary(
+      "Acceptance",
+      result.acceptance.verdict,
+      result.acceptance.residualRisks,
+      effectiveRunMode(state) === "tough",
+    ),
   });
   state = await addEvidence(store, runId, {
     kind: "review",
@@ -195,7 +200,12 @@ export async function reviewAndRecordTask(
     taskId,
     reviewer: "adversarial-reviewer",
     findings: adversarialFindings,
-    summary: `Adversarial verdict: ${result.adversarial.verdict}`,
+    summary: reviewEvidenceSummary(
+      "Adversarial",
+      result.adversarial.verdict,
+      result.adversarial.residualRisks,
+      effectiveRunMode(state) === "tough",
+    ),
   });
 
   const criteria = new Map(result.acceptance.criteria.map((criterion) => [criterion.id, criterion]));
@@ -227,6 +237,26 @@ export async function reviewAndRecordTask(
     await setTaskStatus(store, runId, taskId, "failed");
   }
   return { passed, findings: [...acceptanceFindings, ...adversarialFindings] };
+}
+
+function reviewEvidenceSummary(
+  label: string,
+  verdict: string,
+  residualRisks: string[],
+  includeResidualRisks: boolean,
+): string {
+  const prefix = `${label} verdict: ${verdict}`;
+  if (!includeResidualRisks) return prefix;
+  const normalized = [
+    ...new Set(
+      residualRisks
+        .map((risk) => redactSecrets(risk).trim().slice(0, 1_000))
+        .filter(Boolean),
+    ),
+  ];
+  return normalized.length === 0
+    ? prefix
+    : `${prefix}; Residual risks: ${normalized.join(" | ")}`.slice(0, 4_000);
 }
 
 export async function recordIntegratedCommitEvidence(

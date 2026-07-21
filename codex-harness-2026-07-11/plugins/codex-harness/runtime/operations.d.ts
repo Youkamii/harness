@@ -41,4 +41,6 @@ export declare function finishAgentAttempt(store: RunStore, runId: string, attem
     status: "complete" | "failed" | "timed-out";
     exitCode: number;
     failureFingerprint?: string;
+    summary?: string;
+    residualRisks?: string[];
 }): Promise<RunState>;

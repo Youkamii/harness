@@ -48,6 +48,7 @@ interface WorkerRequest {
   taskId?: string;
   timeoutMs?: number;
   resumeThreadId?: string;
+  captureReport?: boolean;
 }
 
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -122,9 +123,11 @@ export async function runCodexWorker(request: WorkerRequest): Promise<WorkerOutp
     const output = JSON.parse(await readFile(outputFile, "utf8")) as unknown;
     normalizeWorkerOutput(request.role, output);
     validateWorkerOutput(request.role, output);
+    const report = request.captureReport ? workerReport(request.role, output) : {};
     await finishAgentAttempt(request.store, request.runId, attempt.id, {
       status: "complete",
       exitCode: 0,
+      ...report,
     });
     return output;
   } catch (error) {
@@ -201,7 +204,8 @@ function validateWorkerOutput(role: AgentAttempt["role"], value: unknown): asser
     !Array.isArray(review.commands) ||
     !Array.isArray(review.criteria) ||
     !Array.isArray(review.findings) ||
-    !Array.isArray(review.residualRisks)
+    !Array.isArray(review.residualRisks) ||
+    review.residualRisks.some((risk) => typeof risk !== "string")
   ) {
     throw new Error("review output is incomplete");
   }
@@ -220,6 +224,24 @@ function validateWorkerOutput(role: AgentAttempt["role"], value: unknown): asser
       throw new Error("review finding is malformed");
     }
   }
+}
+
+function workerReport(
+  role: AgentAttempt["role"],
+  output: WorkerOutput,
+): { summary?: string; residualRisks?: string[] } {
+  if (role === "planner" || role === "builder") {
+    const summary = redactSecrets((output as PlanOutput | BuilderOutput).summary).trim().slice(0, 4_000);
+    return summary ? { summary } : {};
+  }
+  const residualRisks = [
+    ...new Set(
+      (output as ReviewOutput).residualRisks
+        .map((risk) => redactSecrets(risk).trim().slice(0, 1_000))
+        .filter(Boolean),
+    ),
+  ].slice(0, 100);
+  return residualRisks.length > 0 ? { residualRisks } : {};
 }
 
 async function spawnCodex(input: {
@@ -384,4 +406,12 @@ export function validateWorkerOutputForTest(
   value: unknown,
 ): asserts value is WorkerOutput {
   validateWorkerOutput(role, value);
+}
+
+export function workerReportForTest(
+  role: AgentAttempt["role"],
+  value: unknown,
+): { summary?: string; residualRisks?: string[] } {
+  validateWorkerOutput(role, value);
+  return workerReport(role, value);
 }

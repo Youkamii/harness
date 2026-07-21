@@ -1,6 +1,6 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { GitHubIssue, HarnessTask, RunState } from "./domain.js";
+import { effectiveRunMode, type GitHubIssue, type HarnessTask, type RunState } from "./domain.js";
 import { sha256 } from "./hash.js";
 import { beginEffect, completeEffect, setTaskIssue, transitionRun } from "./operations.js";
 import { boundedRemoteText, githubControllerEnvironment } from "./redact.js";
@@ -113,21 +113,7 @@ async function createIssue(
   effectId: string,
 ): Promise<GitHubIssue> {
   const ordinal = state.tasks.findIndex((candidate) => candidate.id === task.id) + 1;
-  const body = [
-    marker,
-    "",
-    "## Goal",
-    boundedRemoteText(state.goal, repo.isPrivate ? 1_500 : 500),
-    "",
-    "## Local task reference",
-    `- Task ${ordinal} of ${state.tasks.length}`,
-    `- Acceptance criteria: ${task.acceptanceCriteria.length} (details remain in the local tamper-evident ledger)`,
-    "",
-    "## Harness metadata",
-    `- Run: ${state.id}`,
-    `- Lane: ${state.lane}`,
-    "- Completion requires current-tree verification and independent adversarial review.",
-  ].join("\n");
+  const body = renderTaskIssueBody(state, task, repo.isPrivate);
 
   const outbox = path.join(store.root, "outbox");
   await mkdir(outbox, { recursive: true, mode: 0o700 });
@@ -164,6 +150,30 @@ async function createIssue(
   } finally {
     await rm(bodyFile, { force: true });
   }
+}
+
+export function renderTaskIssueBody(
+  state: RunState,
+  task: HarnessTask,
+  isPrivate: boolean,
+): string {
+  const ordinal = state.tasks.findIndex((candidate) => candidate.id === task.id) + 1;
+  return [
+    markerFor(state.id, task.id),
+    "",
+    "## Goal",
+    boundedRemoteText(state.goal, isPrivate ? 1_500 : 500),
+    "",
+    "## Local task reference",
+    `- Task ${ordinal} of ${state.tasks.length}`,
+    `- Acceptance criteria: ${task.acceptanceCriteria.length} (details remain in the local tamper-evident ledger)`,
+    "",
+    "## Harness metadata",
+    `- Run: ${state.id}`,
+    `- Lane: ${state.lane}`,
+    `- Mode: ${effectiveRunMode(state)}`,
+    "- Completion requires current-tree verification and independent adversarial review.",
+  ].join("\n");
 }
 
 function normalizeIssue(issue: ListedIssue, marker: string): GitHubIssue {

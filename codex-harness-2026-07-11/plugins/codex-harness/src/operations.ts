@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import {
+  applyRunModeToPlanTasks,
   assertRunTransition,
   currentConfigHash,
   evaluateCompletion,
+  normalizeNonGoalsForRunMode,
   type AgentAttempt,
   type EvidenceRecord,
   type ExternalEffect,
@@ -13,6 +15,7 @@ import {
   type TaskStatus,
 } from "./domain.js";
 import { materializeTasks, refreshReadyTasks } from "./graph.js";
+import { redactSecrets } from "./redact.js";
 import { RunStore } from "./store.js";
 
 const taskTransitions: Record<TaskStatus, ReadonlySet<TaskStatus>> = {
@@ -28,7 +31,8 @@ const taskTransitions: Record<TaskStatus, ReadonlySet<TaskStatus>> = {
 };
 
 export async function applyPlan(store: RunStore, runId: string, tasks: PlannedTask[]): Promise<RunState> {
-  const materialized = materializeTasks(tasks);
+  const current = await store.load(runId);
+  const materialized = materializeTasks(applyRunModeToPlanTasks(current, tasks));
   return await store.update(
     runId,
     "plan.applied",
@@ -43,6 +47,7 @@ export async function applyPlan(store: RunStore, runId: string, tasks: PlannedTa
         state.status = "planning";
       }
       state.tasks = materialized;
+      state.nonGoals = normalizeNonGoalsForRunMode(state, state.nonGoals);
       state.evidence = [];
       return state;
     },
@@ -332,7 +337,8 @@ export async function recordNonGoals(
   runId: string,
   nonGoals: string[],
 ): Promise<RunState> {
-  const normalized = [...new Set(nonGoals.map((value) => value.trim()).filter(Boolean))].slice(0, 20);
+  const current = await store.load(runId);
+  const normalized = normalizeNonGoalsForRunMode(current, nonGoals);
   return await store.update(
     runId,
     "run.non-goals.recorded",
@@ -515,21 +521,58 @@ export async function finishAgentAttempt(
     status: "complete" | "failed" | "timed-out";
     exitCode: number;
     failureFingerprint?: string;
+    summary?: string;
+    residualRisks?: string[];
   },
 ): Promise<RunState> {
+  const { summary: _summary, residualRisks: _residualRisks, ...completion } = result;
+  const report = normalizeAttemptReport(result.summary, result.residualRisks);
   return await store.update(
     runId,
     "agent.finished",
     (state) => {
       const attempt = requireAttempt(state, attemptId);
-      attempt.status = result.status;
-      attempt.exitCode = result.exitCode;
+      attempt.status = completion.status;
+      attempt.exitCode = completion.exitCode;
       attempt.completedAt = new Date().toISOString();
-      if (result.failureFingerprint) attempt.failureFingerprint = result.failureFingerprint;
+      if (completion.failureFingerprint) attempt.failureFingerprint = completion.failureFingerprint;
+      if (report.summary) attempt.summary = report.summary;
+      if (report.residualRisks) attempt.residualRisks = report.residualRisks;
       return state;
     },
-    { attemptId, ...result },
+    { attemptId, ...completion, ...report },
   );
+}
+
+function normalizeAttemptReport(
+  summary: unknown,
+  residualRisks: unknown,
+): { summary?: string; residualRisks?: string[] } {
+  if (summary !== undefined && typeof summary !== "string") {
+    throw new Error("agent report summary must be a string");
+  }
+  if (
+    residualRisks !== undefined &&
+    (!Array.isArray(residualRisks) || residualRisks.some((risk) => typeof risk !== "string"))
+  ) {
+    throw new Error("agent residual risks must be an array of strings");
+  }
+  const normalizedSummary = typeof summary === "string"
+    ? redactSecrets(summary).trim().slice(0, 4_000)
+    : "";
+  const normalizedRisks = Array.isArray(residualRisks)
+    ? [
+        ...new Set(
+          residualRisks
+            .map((risk) => redactSecrets(risk).trim().slice(0, 1_000))
+            .filter(Boolean),
+        ),
+      ].slice(0, 100)
+    : [];
+  return {
+    ...(normalizedSummary ? { summary: normalizedSummary } : {}),
+    ...(normalizedRisks.length > 0 ? { residualRisks: normalizedRisks } : {}),
+  };
 }
 
 function requireAttempt(state: RunState, attemptId: string): AgentAttempt {

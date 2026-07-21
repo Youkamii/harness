@@ -37,8 +37,13 @@ interface WorkerRequest {
     taskId?: string;
     timeoutMs?: number;
     resumeThreadId?: string;
+    captureReport?: boolean;
 }
 export declare function runCodexWorker(request: WorkerRequest): Promise<WorkerOutput>;
 export declare function codexArgumentsForTest(role: AgentAttempt["role"], cwd: string, schema: string, output: string): string[];
 export declare function validateWorkerOutputForTest(role: AgentAttempt["role"], value: unknown): asserts value is WorkerOutput;
+export declare function workerReportForTest(role: AgentAttempt["role"], value: unknown): {
+    summary?: string;
+    residualRisks?: string[];
+};
 export {};

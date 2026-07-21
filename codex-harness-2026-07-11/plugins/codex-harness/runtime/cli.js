@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { currentConfigHash, evaluateCompletion, RUN_STATUSES, } from "./domain.js";
+import { currentConfigHash, evaluateCompletion, RUN_MODES, RUN_STATUSES, } from "./domain.js";
 import { applyPlan, transitionRun } from "./operations.js";
 import { syncTaskIssues } from "./github.js";
 import { commitTask, prepareTaskWorktree } from "./git.js";
@@ -12,6 +12,7 @@ import { assertWithin, discoverRepo, workspaceFingerprint } from "./repo.js";
 import { RunStore } from "./store.js";
 const VERSION = "0.1.0";
 const lanes = new Set(["fast", "build", "deep", "autonomous"]);
+const modes = new Set(RUN_MODES);
 async function main() {
     const parsed = parseArguments(process.argv.slice(2));
     if (parsed.options.has("version") || parsed.command === "version")
@@ -39,11 +40,13 @@ async function main() {
         case "start": {
             const goal = requiredOption(parsed, "goal");
             const lane = (option(parsed, "lane") ?? routeLane(goal));
+            const mode = parseRunMode(option(parsed, "mode"));
             if (!lanes.has(lane))
                 throw new Error(`invalid lane: ${lane}`);
             const state = await store.create({
                 goal,
                 lane,
+                mode,
                 repoRoot: repo.root,
                 gitCommonDir: repo.gitCommonDir,
             });
@@ -52,11 +55,13 @@ async function main() {
         case "auto": {
             const goal = requiredOption(parsed, "goal");
             const lane = (option(parsed, "lane") ?? routeLane(goal));
+            const mode = parseRunMode(option(parsed, "mode"));
             if (!lanes.has(lane))
                 throw new Error(`invalid lane: ${lane}`);
             const reusable = await store.createOrReuse({
                 goal,
                 lane,
+                mode,
                 repoRoot: repo.root,
                 gitCommonDir: repo.gitCommonDir,
             });
@@ -74,7 +79,7 @@ async function main() {
         }
         case "route": {
             const goal = requiredOption(parsed, "goal");
-            return printJson({ lane: routeLane(goal) });
+            return printJson({ lane: routeLane(goal), mode: parseRunMode(option(parsed, "mode")) });
         }
         case "agent-plan": {
             const runId = await resolveRunId(store, parsed);
@@ -176,6 +181,12 @@ function requiredOption(parsed, name) {
         throw new Error(`--${name} is required`);
     return value;
 }
+function parseRunMode(value) {
+    const mode = value ?? "standard";
+    if (!modes.has(mode))
+        throw new Error(`invalid mode: ${mode}`);
+    return mode;
+}
 async function resolveRunId(store, parsed) {
     const runId = option(parsed, "run") ?? (await store.currentRunId());
     if (!runId)
@@ -197,11 +208,11 @@ function printHelp() {
         "Commands:",
         "  init [--repo PATH]",
         "  doctor [--repo PATH]",
-        "  start --goal TEXT [--lane fast|build|deep|autonomous]",
-        "  auto --goal TEXT [--lane fast|build|deep|autonomous]",
+        "  start --goal TEXT [--lane fast|build|deep|autonomous] [--mode standard|tough]",
+        "  auto --goal TEXT [--lane fast|build|deep|autonomous] [--mode standard|tough]",
         "  resume [--run ID]",
         "  status [--run ID]",
-        "  route --goal TEXT",
+        "  route --goal TEXT [--mode standard|tough]",
         "  agent-plan [--run ID]",
         "  agent-build --task TASK [--run ID]",
         "  agent-review --task TASK [--run ID]",

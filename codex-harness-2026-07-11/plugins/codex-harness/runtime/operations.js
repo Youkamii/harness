@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { assertRunTransition, currentConfigHash, evaluateCompletion, } from "./domain.js";
+import { applyRunModeToPlanTasks, assertRunTransition, currentConfigHash, evaluateCompletion, normalizeNonGoalsForRunMode, } from "./domain.js";
 import { materializeTasks, refreshReadyTasks } from "./graph.js";
+import { redactSecrets } from "./redact.js";
 const taskTransitions = {
     pending: new Set(["ready", "blocked"]),
     ready: new Set(["running", "blocked"]),
@@ -13,7 +14,8 @@ const taskTransitions = {
     blocked: new Set(["ready", "failed"]),
 };
 export async function applyPlan(store, runId, tasks) {
-    const materialized = materializeTasks(tasks);
+    const current = await store.load(runId);
+    const materialized = materializeTasks(applyRunModeToPlanTasks(current, tasks));
     return await store.update(runId, "plan.applied", (state) => {
         if (state.status === "created") {
             assertRunTransition(state.status, "planning");
@@ -27,6 +29,7 @@ export async function applyPlan(store, runId, tasks) {
             state.status = "planning";
         }
         state.tasks = materialized;
+        state.nonGoals = normalizeNonGoalsForRunMode(state, state.nonGoals);
         state.evidence = [];
         return state;
     }, { taskIds: materialized.map((task) => task.id) });
@@ -193,7 +196,8 @@ export async function recordAssumptions(store, runId, assumptions) {
     }, { count: normalized.length });
 }
 export async function recordNonGoals(store, runId, nonGoals) {
-    const normalized = [...new Set(nonGoals.map((value) => value.trim()).filter(Boolean))].slice(0, 20);
+    const current = await store.load(runId);
+    const normalized = normalizeNonGoalsForRunMode(current, nonGoals);
     return await store.update(runId, "run.non-goals.recorded", (state) => {
         state.nonGoals = normalized;
         return state;
@@ -292,15 +296,44 @@ export async function recordAgentThread(store, runId, attemptId, threadId) {
     }, { attemptId, threadId });
 }
 export async function finishAgentAttempt(store, runId, attemptId, result) {
+    const { summary: _summary, residualRisks: _residualRisks, ...completion } = result;
+    const report = normalizeAttemptReport(result.summary, result.residualRisks);
     return await store.update(runId, "agent.finished", (state) => {
         const attempt = requireAttempt(state, attemptId);
-        attempt.status = result.status;
-        attempt.exitCode = result.exitCode;
+        attempt.status = completion.status;
+        attempt.exitCode = completion.exitCode;
         attempt.completedAt = new Date().toISOString();
-        if (result.failureFingerprint)
-            attempt.failureFingerprint = result.failureFingerprint;
+        if (completion.failureFingerprint)
+            attempt.failureFingerprint = completion.failureFingerprint;
+        if (report.summary)
+            attempt.summary = report.summary;
+        if (report.residualRisks)
+            attempt.residualRisks = report.residualRisks;
         return state;
-    }, { attemptId, ...result });
+    }, { attemptId, ...completion, ...report });
+}
+function normalizeAttemptReport(summary, residualRisks) {
+    if (summary !== undefined && typeof summary !== "string") {
+        throw new Error("agent report summary must be a string");
+    }
+    if (residualRisks !== undefined &&
+        (!Array.isArray(residualRisks) || residualRisks.some((risk) => typeof risk !== "string"))) {
+        throw new Error("agent residual risks must be an array of strings");
+    }
+    const normalizedSummary = typeof summary === "string"
+        ? redactSecrets(summary).trim().slice(0, 4_000)
+        : "";
+    const normalizedRisks = Array.isArray(residualRisks)
+        ? [
+            ...new Set(residualRisks
+                .map((risk) => redactSecrets(risk).trim().slice(0, 1_000))
+                .filter(Boolean)),
+        ].slice(0, 100)
+        : [];
+    return {
+        ...(normalizedSummary ? { summary: normalizedSummary } : {}),
+        ...(normalizedRisks.length > 0 ? { residualRisks: normalizedRisks } : {}),
+    };
 }
 function requireAttempt(state, attemptId) {
     const attempt = state.attempts.find((candidate) => candidate.id === attemptId);

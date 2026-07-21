@@ -17,6 +17,8 @@ export const RUN_STATUSES = [
 
 export type RunStatus = (typeof RUN_STATUSES)[number];
 export type Lane = "fast" | "build" | "deep" | "autonomous";
+export const RUN_MODES = ["standard", "tough"] as const;
+export type RunMode = (typeof RUN_MODES)[number];
 export type TaskStatus =
   | "pending"
   | "ready"
@@ -113,6 +115,10 @@ export interface AgentAttempt {
   threadId?: string;
   exitCode?: number;
   failureFingerprint?: string;
+  /** Tough-mode planner or builder report, redacted before it enters the ledger. */
+  summary?: string;
+  /** Tough-mode reviewer concerns that are reported without becoming requirements. */
+  residualRisks?: string[];
 }
 
 export interface RunState {
@@ -120,6 +126,8 @@ export interface RunState {
   id: string;
   goal: string;
   lane: Lane;
+  /** Missing on legacy schemaVersion 1 runs and interpreted as standard. */
+  mode?: RunMode;
   status: RunStatus;
   repoRoot: string;
   gitCommonDir: string;
@@ -145,6 +153,12 @@ export interface RunState {
     startedAt: string;
   };
 }
+
+export const TOUGH_MODE_NON_GOAL =
+  "Inventing or implementing product security, safety, protective behavior, or operational constraints that the user did not request and the repository does not already require.";
+
+export const TOUGH_MODE_ACCEPTANCE_CRITERION =
+  "No unrequested product security, safety, protective behavior, or operational constraint is added; identified concerns are reported without implementing them.";
 
 export interface JournalEvent {
   schemaVersion: 1;
@@ -179,9 +193,46 @@ export function assertRunTransition(from: RunStatus, to: RunStatus): void {
   }
 }
 
-export function currentConfigHash(state: Pick<RunState, "lane" | "tasks" | "nonGoals">): string {
+export function effectiveRunMode(state: Pick<RunState, "mode">): RunMode {
+  return state.mode ?? "standard";
+}
+
+export function applyRunModeToPlanTasks(
+  state: Pick<RunState, "mode">,
+  tasks: PlannedTask[],
+): PlannedTask[] {
+  if (effectiveRunMode(state) !== "tough") return tasks;
+  return tasks.map((task) => {
+    if (task.acceptanceCriteria.includes(TOUGH_MODE_ACCEPTANCE_CRITERION)) return task;
+    if (task.acceptanceCriteria.length >= 100) {
+      throw new Error(`task ${task.id} has no room for the tough-mode acceptance criterion`);
+    }
+    return {
+      ...task,
+      acceptanceCriteria: [...task.acceptanceCriteria, TOUGH_MODE_ACCEPTANCE_CRITERION],
+    };
+  });
+}
+
+export function normalizeNonGoalsForRunMode(
+  state: Pick<RunState, "mode">,
+  nonGoals: string[],
+): string[] {
+  const normalized = [...new Set(nonGoals.map((value) => value.trim()).filter(Boolean))];
+  if (effectiveRunMode(state) !== "tough") return normalized.slice(0, 20);
+  const otherNonGoals = normalized.filter((nonGoal) => nonGoal !== TOUGH_MODE_NON_GOAL);
+  if (otherNonGoals.length > 19) {
+    throw new Error("tough mode requires room for its deterministic non-goal");
+  }
+  return [TOUGH_MODE_NON_GOAL, ...otherNonGoals];
+}
+
+export function currentConfigHash(
+  state: Pick<RunState, "lane" | "mode" | "tasks" | "nonGoals">,
+): string {
   const normalized = {
     lane: state.lane,
+    ...(state.mode === undefined ? {} : { mode: state.mode }),
     nonGoals: state.nonGoals,
     tasks: state.tasks.map(({ id, dependencies, acceptanceCriteria, ownedPaths, checks, risk }) => ({
       id,
@@ -249,7 +300,11 @@ export function evaluateCompletion(
     );
     if (!commitRecorded) reasons.push(`task lacks current commit evidence: ${task.id}`);
 
-    const requiredReviews = task.ownedPaths.some((ownedPath) => !ownedPath.endsWith(".md")) ? 2 : 1;
+    const requiredReviews =
+      effectiveRunMode(state) === "tough" ||
+      task.ownedPaths.some((ownedPath) => !ownedPath.endsWith(".md"))
+        ? 2
+        : 1;
     const distinctReviewers = new Set(
       taskEvidence
         .filter((evidence) => evidence.kind === "review" && evidence.status === "approved")

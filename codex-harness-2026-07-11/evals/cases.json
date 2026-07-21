@@ -34,5 +34,35 @@
     "kind": "policy-text",
     "files": ["AGENTS.md", "plugins/codex-harness/skills/forge/SKILL.md"],
     "expected": "does not broaden"
+  },
+  {
+    "id": "legacy-run-mode-is-standard",
+    "kind": "run-mode",
+    "input": null,
+    "expected": "standard"
+  },
+  {
+    "id": "explicit-tough-run-mode",
+    "kind": "run-mode",
+    "input": "tough",
+    "expected": "tough"
+  },
+  {
+    "id": "tough-scope-contract",
+    "kind": "policy-text",
+    "files": [
+      "README.md",
+      "plugins/codex-harness/skills/forge/SKILL.md",
+      "plugins/codex-harness/skills/forge/references/workflow.md",
+      "plugins/codex-harness/skills/tough/SKILL.md"
+    ],
+    "expected": "product security"
+  },
+  {
+    "id": "tough-affirmative-trigger-contract",
+    "kind": "skill-trigger-contract",
+    "file": "plugins/codex-harness/skills/tough/SKILL.md",
+    "affirmative": ["$tough GOAL", "터프 모드로 구현해", "use tough mode to implement this"],
+    "nonActivating": ["tough mode 쓰지 마", "tough mode가 뭐야?", "quotations or code blocks"]
   }
 ]

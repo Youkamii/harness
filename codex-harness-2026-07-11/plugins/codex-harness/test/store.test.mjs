@@ -1,11 +1,25 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { applyPlan, reopenTaskForRemediation, setTaskStatus } from "../runtime/operations.js";
+import { applyPlannerOutputForTest } from "../runtime/autonomy.js";
+import {
+  effectiveRunMode,
+  TOUGH_MODE_ACCEPTANCE_CRITERION,
+  TOUGH_MODE_NON_GOAL,
+} from "../runtime/domain.js";
+import { hashObject } from "../runtime/hash.js";
+import {
+  applyPlan,
+  finishAgentAttempt,
+  recordNonGoals,
+  reopenTaskForRemediation,
+  setTaskStatus,
+  startAgentAttempt,
+} from "../runtime/operations.js";
 import { RunStore } from "../runtime/store.js";
 
 async function withTempStore(callback) {
@@ -91,6 +105,7 @@ test("store persists runs outside a worktree and replays the hash chain", async 
     const loaded = await store.load(created.id);
     assert.equal(loaded.sequence, state.sequence);
     assert.equal(loaded.repoRoot, "C:\\repo");
+    assert.equal(loaded.mode, "standard");
     assert.match(path.join(root, "runs", created.id), new RegExp(created.id));
   });
 });
@@ -208,6 +223,234 @@ test("createOrReuse atomically deduplicates concurrent identical goals", async (
       ),
     );
     assert.equal(new Set(states.map((state) => state.id)).size, 1);
+  });
+});
+
+test("createOrReuse requires matching lane and effective mode", async () => {
+  await withTempStore(async (store) => {
+    const input = {
+      goal: "same goal",
+      lane: "build",
+      repoRoot: "/repo",
+      gitCommonDir: "/repo/.git",
+    };
+    const standard = await store.createOrReuse(input);
+    const sameStandard = await store.createOrReuse(input);
+    assert.equal(sameStandard.id, standard.id);
+
+    const differentLane = await store.createOrReuse({ ...input, lane: "deep" });
+    assert.notEqual(differentLane.id, standard.id);
+
+    const tough = await store.createOrReuse({ ...input, lane: "deep", mode: "tough" });
+    assert.notEqual(tough.id, differentLane.id);
+    const sameTough = await store.createOrReuse({ ...input, lane: "deep", mode: "tough" });
+    assert.equal(sameTough.id, tough.id);
+  });
+});
+
+test("store rejects invalid modes before writing a run or changing current", async () => {
+  await withTempStore(async (store, root) => {
+    await store.initialize();
+    const invalid = {
+      goal: "invalid mode",
+      lane: "build",
+      mode: "reckless",
+      repoRoot: "/repo",
+      gitCommonDir: "/repo/.git",
+    };
+    await assert.rejects(() => store.create(invalid), /invalid run mode: reckless/);
+    assert.equal(await store.currentRunId(), undefined);
+    assert.deepEqual(await readdir(path.join(root, "runs")), []);
+
+    const valid = await store.create({ ...invalid, mode: "standard" });
+    await assert.rejects(() => store.createOrReuse(invalid), /invalid run mode: reckless/);
+    assert.equal(await store.currentRunId(), valid.id);
+    assert.equal((await store.load(valid.id)).mode, "standard");
+    assert.deepEqual(await readdir(path.join(root, "runs")), [valid.id]);
+  });
+});
+
+test("run mode is immutable after creation", async () => {
+  await withTempStore(async (store) => {
+    const created = await store.create({
+      goal: "immutable mode",
+      lane: "build",
+      mode: "standard",
+      repoRoot: "/repo",
+      gitCommonDir: "/repo/.git",
+    });
+    await assert.rejects(
+      () => store.update(created.id, "test.change-mode", (state) => {
+        state.mode = "tough";
+        return state;
+      }, {}),
+      /run mode is immutable/,
+    );
+    const loaded = await store.load(created.id);
+    assert.equal(loaded.mode, "standard");
+    assert.equal(loaded.sequence, created.sequence);
+  });
+});
+
+test("store loads a legacy schema-version-1 journal without mode as standard", async () => {
+  await withTempStore(async (store, root) => {
+    const created = await store.create({
+      goal: "legacy",
+      lane: "build",
+      repoRoot: "/repo",
+      gitCommonDir: "/repo/.git",
+    });
+    const journalPath = path.join(root, "runs", created.id, "events.jsonl");
+    const event = JSON.parse((await readFile(journalPath, "utf8")).trim());
+    delete event.payload.detail.mode;
+    delete event.payload.state.mode;
+    const { hash: _oldHash, ...withoutHash } = event;
+    event.hash = hashObject(withoutHash);
+    await writeFile(journalPath, `${JSON.stringify(event)}\n`, "utf8");
+
+    const loaded = await store.load(created.id);
+    assert.equal(loaded.mode, undefined);
+    assert.equal(effectiveRunMode(loaded), "standard");
+    const reused = await store.createOrReuse({
+      goal: "legacy",
+      lane: "build",
+      repoRoot: "/repo",
+      gitCommonDir: "/repo/.git",
+    });
+    assert.equal(reused.id, created.id);
+  });
+});
+
+test("tough plans receive a deterministic criterion and non-goal", async () => {
+  await withTempStore(async (store) => {
+    const created = await store.create({
+      goal: "exact scope",
+      lane: "build",
+      mode: "tough",
+      repoRoot: "/repo",
+      gitCommonDir: "/repo/.git",
+    });
+    let state = await applyPlan(store, created.id, plan());
+    assert.ok(state.tasks.every((task) =>
+      task.acceptanceCriteria.at(-1) === TOUGH_MODE_ACCEPTANCE_CRITERION));
+    assert.equal(state.nonGoals[0], TOUGH_MODE_NON_GOAL);
+
+    const supplied = Array.from({ length: 19 }, (_, index) => `planner non-goal ${index}`);
+    state = await recordNonGoals(store, created.id, supplied);
+    assert.equal(state.nonGoals.length, 20);
+    assert.equal(state.nonGoals[0], TOUGH_MODE_NON_GOAL);
+    assert.deepEqual(state.nonGoals.slice(1), supplied);
+
+    await assert.rejects(
+      () => recordNonGoals(
+        store,
+        created.id,
+        Array.from({ length: 20 }, (_, index) => `overflow non-goal ${index}`),
+      ),
+      /requires room for its deterministic non-goal/,
+    );
+    const unchanged = await store.load(created.id);
+    assert.equal(unchanged.sequence, state.sequence);
+    assert.deepEqual(unchanged.nonGoals, state.nonGoals);
+  });
+});
+
+test("Tough planner overflow is rejected before plan metadata is written", async () => {
+  await withTempStore(async (store) => {
+    const created = await store.create({
+      goal: "atomic planner output",
+      lane: "build",
+      mode: "tough",
+      repoRoot: "/repo",
+      gitCommonDir: "/repo/.git",
+    });
+    await assert.rejects(
+      () => applyPlannerOutputForTest(store, created, {
+        summary: "A valid plan whose non-goal list has no reserved Tough slot.",
+        assumptions: ["an assumption that must not be partially persisted"],
+        nonGoals: Array.from({ length: 20 }, (_, index) => `planner exclusion ${index}`),
+        tasks: plan(),
+      }),
+      /requires room for its deterministic non-goal/,
+    );
+    const unchanged = await store.load(created.id);
+    assert.equal(unchanged.sequence, created.sequence);
+    assert.equal(unchanged.status, "created");
+    assert.deepEqual(unchanged.tasks, []);
+    assert.deepEqual(unchanged.assumptions, []);
+    assert.deepEqual(unchanged.nonGoals, []);
+  });
+});
+
+test("completed Tough worker attempts retain their user-facing reports", async () => {
+  await withTempStore(async (store) => {
+    const created = await store.create({
+      goal: "report concerns",
+      lane: "build",
+      mode: "tough",
+      repoRoot: "/repo",
+      gitCommonDir: "/repo/.git",
+    });
+    const attempt = await startAgentAttempt(store, created.id, {
+      role: "adversarial-reviewer",
+      sandbox: "read-only",
+      cwd: "/repo",
+    });
+    const state = await finishAgentAttempt(store, created.id, attempt.id, {
+      status: "complete",
+      exitCode: 0,
+      summary: "No unrequested mitigation was implemented.",
+      residualRisks: ["A product concern remains outside the requested scope."],
+    });
+    const recorded = state.attempts.find((candidate) => candidate.id === attempt.id);
+    assert.equal(recorded?.summary, "No unrequested mitigation was implemented.");
+    assert.deepEqual(recorded?.residualRisks, [
+      "A product concern remains outside the requested scope.",
+    ]);
+    assert.deepEqual((await store.load(created.id)).attempts, state.attempts);
+
+    await assert.rejects(
+      () => finishAgentAttempt(store, created.id, attempt.id, {
+        status: "complete",
+        exitCode: 0,
+        residualRisks: [42],
+      }),
+      /residual risks must be an array of strings/,
+    );
+    assert.equal((await store.load(created.id)).sequence, state.sequence);
+  });
+});
+
+test("tough criterion fills the 100-item limit and rejects overflow atomically", async () => {
+  await withTempStore(async (store) => {
+    const input = {
+      goal: "criterion boundary",
+      lane: "build",
+      mode: "tough",
+      repoRoot: "/repo",
+      gitCommonDir: "/repo/.git",
+    };
+    const fits = await store.create(input);
+    const base = plan()[0];
+    const planned = await applyPlan(store, fits.id, [{
+      ...base,
+      acceptanceCriteria: Array.from({ length: 99 }, (_, index) => `AC${index}`),
+    }]);
+    assert.equal(planned.tasks[0].acceptanceCriteria.length, 100);
+    assert.equal(planned.tasks[0].acceptanceCriteria.at(-1), TOUGH_MODE_ACCEPTANCE_CRITERION);
+
+    const overflows = await store.create(input);
+    await assert.rejects(
+      () => applyPlan(store, overflows.id, [{
+        ...base,
+        acceptanceCriteria: Array.from({ length: 100 }, (_, index) => `AC${index}`),
+      }]),
+      /no room for the tough-mode acceptance criterion/,
+    );
+    const unchanged = await store.load(overflows.id);
+    assert.equal(unchanged.sequence, overflows.sequence);
+    assert.equal(unchanged.status, "created");
+    assert.deepEqual(unchanged.tasks, []);
   });
 });
 

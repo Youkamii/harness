@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { effectiveRunMode } from "../plugins/codex-harness/runtime/domain.js";
 import { routeLane } from "../plugins/codex-harness/runtime/autonomy.js";
 import { validatePlan } from "../plugins/codex-harness/runtime/graph.js";
 import { redactSecrets } from "../plugins/codex-harness/runtime/redact.js";
@@ -29,6 +30,17 @@ for (const evaluation of cases) {
       assert.equal(redactSecrets(evaluation.input).includes(evaluation.forbidden), false);
     } else if (evaluation.kind === "lane") {
       assert.equal(routeLane(evaluation.input), evaluation.expected);
+    } else if (evaluation.kind === "run-mode") {
+      assert.equal(
+        effectiveRunMode(evaluation.input ? { mode: evaluation.input } : {}),
+        evaluation.expected,
+      );
+    } else if (evaluation.kind === "skill-trigger-contract") {
+      const content = await readFile(path.join(root, evaluation.file), "utf8");
+      const frontmatter = content.split("---", 3)[1] ?? "";
+      for (const phrase of [...evaluation.affirmative, ...evaluation.nonActivating]) {
+        assert.ok(frontmatter.includes(phrase), `skill trigger contract is missing: ${phrase}`);
+      }
     } else if (evaluation.kind === "policy-text") {
       for (const file of evaluation.files) {
         const content = await readFile(path.join(root, file), "utf8");

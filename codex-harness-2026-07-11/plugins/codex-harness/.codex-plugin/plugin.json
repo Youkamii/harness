@@ -1,6 +1,6 @@
 {
   "name": "codex-harness",
-  "version": "0.1.0+codex.20260710171848",
+  "version": "0.1.0+codex.20260721042013",
   "description": "Autonomous Codex-native issue-to-verified-commit harness with durable tasks and adversarial multi-agent review.",
   "author": {
     "name": "Youkamii",

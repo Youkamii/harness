@@ -1,5 +1,23 @@
 # Codex Harness
 
+## Run modes
+
+Run mode is separate from the `fast | build | deep | autonomous` lane:
+
+- `standard` is the default. Existing schema-version-1 run ledgers without a `mode` field are read as `standard`.
+- `tough` is an affirmative opt-in exact-scope mode. Invoke it with `$tough <goal>`, an instruction such as “터프 모드로 구현해,” or the controller's `--mode tough` option. Negations, questions, ordinary mentions, quotations, and code examples do not activate it.
+
+Tough mode prevents workers from inventing product security, safety, protective behavior, or operational constraints outside the user's request and established repository contracts. For example, it must not silently add an arbitrary trading cap, approval step, kill switch, product allowlist, delay, or simulation-only behavior. These mechanisms are not globally banned: implement them when requested and preserve them when already required. Otherwise report the concern without changing product behavior.
+
+Tough mode does not weaken the harness. Existing product protections, platform policy, approval and sandbox boundaries, secret handling, repository instructions, verification, and review gates remain in force. If requested behavior conflicts with a mandatory protection, the worker preserves it and reports the exact blocker instead of removing it or inventing a substitute restriction.
+
+```bash
+node plugins/codex-harness/skills/forge/scripts/forge.mjs route --goal "implement the requested strategy" --mode tough
+node plugins/codex-harness/skills/forge/scripts/forge.mjs auto --goal "implement the requested strategy" --mode tough
+```
+
+Mode is stored in the run ledger, included in its configuration hash, and shown in GitHub task metadata. `auto` reuses the current unfinished run only when its goal, repository, lane, and effective mode match; it does not search older non-current runs. Legacy ledgers without `mode` keep their pre-mode configuration-hash shape so existing evidence remains valid. Every Tough task receives a deterministic scope acceptance criterion and requires two distinct current-tree reviewers, including documentation-only tasks. Tough planner/builder summaries and reviewer residual risks are redacted and retained in the run ledger so reported concerns survive autonomous completion.
+
 한 줄로 말하면, **“기능을 만들어줘”라는 요청을 받은 Codex가 계획·이슈·코드·테스트·커밋·적대적 리뷰까지 스스로 끝내되, 증거 없이는 완료했다고 말하지 못하게 하는 개인용 실행 하네스**입니다.
 
 단순 프롬프트 모음이 아닙니다. Codex 플러그인과 `$forge` 스킬이 사용자의 의도를 이해하고, TypeScript 컨트롤러가 Git·GitHub·상태·재시도·완료 판정을 강제합니다. 모델은 생각하고 코드를 쓰지만 자기 작업을 스스로 합격시키거나 권한을 넓힐 수 없습니다.

@@ -1,8 +1,9 @@
-import type { Lane, RunState } from "./domain.js";
-import { type BuilderOutput, type ReviewOutput } from "./codex-worker.js";
+import { type Lane, type RunMode, type RunState } from "./domain.js";
+import { type BuilderOutput, type PlanOutput, type ReviewOutput } from "./codex-worker.js";
 import { RunStore } from "./store.js";
 export declare function routeLane(goal: string): Lane;
 export declare function planRun(store: RunStore, state: RunState): Promise<RunState>;
+export declare function applyPlannerOutputForTest(store: RunStore, state: RunState, output: PlanOutput): Promise<RunState>;
 export declare function buildTask(store: RunStore, runId: string, taskId: string): Promise<{
     state: RunState;
     output: BuilderOutput;
@@ -16,3 +17,4 @@ export declare function reviewTask(store: RunStore, runId: string, taskId: strin
     adversarial: ReviewOutput;
     treeHash: string;
 }>;
+export declare function runModeInstructions(mode: RunMode, role: "planner" | "builder" | "reviewer"): string[];

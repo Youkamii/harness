@@ -13,6 +13,9 @@ export const RUN_STATUSES = [
     "blocked",
     "cancelled",
 ];
+export const RUN_MODES = ["standard", "tough"];
+export const TOUGH_MODE_NON_GOAL = "Inventing or implementing product security, safety, protective behavior, or operational constraints that the user did not request and the repository does not already require.";
+export const TOUGH_MODE_ACCEPTANCE_CRITERION = "No unrequested product security, safety, protective behavior, or operational constraint is added; identified concerns are reported without implementing them.";
 const transitions = {
     created: new Set(["planning", "blocked", "cancelled"]),
     planning: new Set(["issue_sync", "executing", "blocked", "failed", "cancelled"]),
@@ -32,9 +35,38 @@ export function assertRunTransition(from, to) {
         throw new Error(`invalid run transition: ${from} -> ${to}`);
     }
 }
+export function effectiveRunMode(state) {
+    return state.mode ?? "standard";
+}
+export function applyRunModeToPlanTasks(state, tasks) {
+    if (effectiveRunMode(state) !== "tough")
+        return tasks;
+    return tasks.map((task) => {
+        if (task.acceptanceCriteria.includes(TOUGH_MODE_ACCEPTANCE_CRITERION))
+            return task;
+        if (task.acceptanceCriteria.length >= 100) {
+            throw new Error(`task ${task.id} has no room for the tough-mode acceptance criterion`);
+        }
+        return {
+            ...task,
+            acceptanceCriteria: [...task.acceptanceCriteria, TOUGH_MODE_ACCEPTANCE_CRITERION],
+        };
+    });
+}
+export function normalizeNonGoalsForRunMode(state, nonGoals) {
+    const normalized = [...new Set(nonGoals.map((value) => value.trim()).filter(Boolean))];
+    if (effectiveRunMode(state) !== "tough")
+        return normalized.slice(0, 20);
+    const otherNonGoals = normalized.filter((nonGoal) => nonGoal !== TOUGH_MODE_NON_GOAL);
+    if (otherNonGoals.length > 19) {
+        throw new Error("tough mode requires room for its deterministic non-goal");
+    }
+    return [TOUGH_MODE_NON_GOAL, ...otherNonGoals];
+}
 export function currentConfigHash(state) {
     const normalized = {
         lane: state.lane,
+        ...(state.mode === undefined ? {} : { mode: state.mode }),
         nonGoals: state.nonGoals,
         tasks: state.tasks.map(({ id, dependencies, acceptanceCriteria, ownedPaths, checks, risk }) => ({
             id,
@@ -84,7 +116,10 @@ export function evaluateCompletion(state, currentTreeHash, configHash) {
         const commitRecorded = taskEvidence.some((evidence) => evidence.kind === "commit" && evidence.status === "pass");
         if (!commitRecorded)
             reasons.push(`task lacks current commit evidence: ${task.id}`);
-        const requiredReviews = task.ownedPaths.some((ownedPath) => !ownedPath.endsWith(".md")) ? 2 : 1;
+        const requiredReviews = effectiveRunMode(state) === "tough" ||
+            task.ownedPaths.some((ownedPath) => !ownedPath.endsWith(".md"))
+            ? 2
+            : 1;
         const distinctReviewers = new Set(taskEvidence
             .filter((evidence) => evidence.kind === "review" && evidence.status === "approved")
             .map((evidence) => evidence.reviewer)

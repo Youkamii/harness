@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { link, mkdir, open, readFile, rename, rm, stat, writeFile, } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { effectiveRunMode, RUN_MODES, } from "./domain.js";
 import { hashObject } from "./hash.js";
 export class RunStore {
     root;
@@ -16,15 +17,19 @@ export class RunStore {
         await mkdir(this.runsRoot, { recursive: true, mode: 0o700 });
     }
     async create(input) {
+        assertInputMode(input.mode);
         return await this.withLock(async () => await this.createUnlocked(input));
     }
     async createOrReuse(input) {
+        assertInputMode(input.mode);
         return await this.withLock(async () => {
             const currentId = await this.currentRunId();
             if (currentId) {
                 const current = await this.load(currentId);
                 if (current.goal === input.goal &&
                     current.repoRoot === input.repoRoot &&
+                    current.lane === input.lane &&
+                    effectiveRunMode(current) === (input.mode ?? "standard") &&
                     !["complete", "failed", "cancelled"].includes(current.status)) {
                     return current;
                 }
@@ -70,6 +75,8 @@ export class RunStore {
             const next = mutate(structuredClone(current));
             if (next.id !== current.id)
                 throw new Error("run id is immutable");
+            if (next.mode !== current.mode)
+                throw new Error("run mode is immutable");
             next.updatedAt = new Date().toISOString();
             await this.persist(next, type, payload);
             return next;
@@ -117,6 +124,7 @@ export class RunStore {
             id: randomUUID(),
             goal: input.goal,
             lane: input.lane,
+            mode: input.mode ?? "standard",
             status: "created",
             repoRoot: input.repoRoot,
             gitCommonDir: input.gitCommonDir,
@@ -131,7 +139,11 @@ export class RunStore {
             attempts: [],
         };
         await mkdir(this.runDir(state.id), { recursive: false, mode: 0o700 });
-        await this.persist(state, "run.created", { goal: state.goal, lane: state.lane });
+        await this.persist(state, "run.created", {
+            goal: state.goal,
+            lane: state.lane,
+            mode: effectiveRunMode(state),
+        });
         await atomicWriteJson(path.join(this.root, "current.json"), { runId: state.id });
         return state;
     }
@@ -422,11 +434,21 @@ function assertRunId(runId) {
     if (!/^[0-9a-f-]{36}$/.test(runId))
         throw new Error(`invalid run id: ${runId}`);
 }
+function assertInputMode(mode) {
+    if (mode === undefined)
+        return;
+    if (typeof mode !== "string" || !RUN_MODES.includes(mode)) {
+        throw new Error(`invalid run mode: ${String(mode)}`);
+    }
+}
 function validateSnapshot(state, expectedId) {
     if (state.schemaVersion !== 1)
         throw new Error("unsupported state schema");
     if (state.id !== expectedId)
         throw new Error("snapshot run id mismatch");
+    if (state.mode !== undefined && !RUN_MODES.includes(state.mode)) {
+        throw new Error(`invalid run mode: ${String(state.mode)}`);
+    }
     if (!Array.isArray(state.tasks) ||
         !Array.isArray(state.evidence) ||
         !Array.isArray(state.outbox) ||

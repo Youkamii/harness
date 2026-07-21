@@ -5,9 +5,11 @@ import path from "node:path";
 import {
   currentConfigHash,
   evaluateCompletion,
+  RUN_MODES,
   RUN_STATUSES,
   type Lane,
   type PlannedTask,
+  type RunMode,
   type RunStatus,
 } from "./domain.js";
 import { applyPlan, transitionRun } from "./operations.js";
@@ -21,6 +23,7 @@ import { RunStore } from "./store.js";
 
 const VERSION = "0.1.0";
 const lanes = new Set<Lane>(["fast", "build", "deep", "autonomous"]);
+const modes = new Set<string>(RUN_MODES);
 
 interface ParsedArguments {
   command?: string;
@@ -54,10 +57,12 @@ async function main(): Promise<void> {
     case "start": {
       const goal = requiredOption(parsed, "goal");
       const lane = (option(parsed, "lane") ?? routeLane(goal)) as Lane;
+      const mode = parseRunMode(option(parsed, "mode"));
       if (!lanes.has(lane)) throw new Error(`invalid lane: ${lane}`);
       const state = await store.create({
         goal,
         lane,
+        mode,
         repoRoot: repo.root,
         gitCommonDir: repo.gitCommonDir,
       });
@@ -66,10 +71,12 @@ async function main(): Promise<void> {
     case "auto": {
       const goal = requiredOption(parsed, "goal");
       const lane = (option(parsed, "lane") ?? routeLane(goal)) as Lane;
+      const mode = parseRunMode(option(parsed, "mode"));
       if (!lanes.has(lane)) throw new Error(`invalid lane: ${lane}`);
       const reusable = await store.createOrReuse({
         goal,
         lane,
+        mode,
         repoRoot: repo.root,
         gitCommonDir: repo.gitCommonDir,
       });
@@ -89,7 +96,7 @@ async function main(): Promise<void> {
     }
     case "route": {
       const goal = requiredOption(parsed, "goal");
-      return printJson({ lane: routeLane(goal) });
+      return printJson({ lane: routeLane(goal), mode: parseRunMode(option(parsed, "mode")) });
     }
     case "agent-plan": {
       const runId = await resolveRunId(store, parsed);
@@ -214,6 +221,12 @@ function requiredOption(parsed: ParsedArguments, name: string): string {
   return value;
 }
 
+function parseRunMode(value: string | undefined): RunMode {
+  const mode = value ?? "standard";
+  if (!modes.has(mode)) throw new Error(`invalid mode: ${mode}`);
+  return mode as RunMode;
+}
+
 async function resolveRunId(store: RunStore, parsed: ParsedArguments): Promise<string> {
   const runId = option(parsed, "run") ?? (await store.currentRunId());
   if (!runId) throw new Error("no current run; use start first");
@@ -238,11 +251,11 @@ function printHelp(): void {
       "Commands:",
       "  init [--repo PATH]",
       "  doctor [--repo PATH]",
-      "  start --goal TEXT [--lane fast|build|deep|autonomous]",
-      "  auto --goal TEXT [--lane fast|build|deep|autonomous]",
+      "  start --goal TEXT [--lane fast|build|deep|autonomous] [--mode standard|tough]",
+      "  auto --goal TEXT [--lane fast|build|deep|autonomous] [--mode standard|tough]",
       "  resume [--run ID]",
       "  status [--run ID]",
-      "  route --goal TEXT",
+      "  route --goal TEXT [--mode standard|tough]",
       "  agent-plan [--run ID]",
       "  agent-build --task TASK [--run ID]",
       "  agent-review --task TASK [--run ID]",

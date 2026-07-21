@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { evaluateCompletion } from "../runtime/domain.js";
+import {
+  currentConfigHash,
+  effectiveRunMode,
+  evaluateCompletion,
+} from "../runtime/domain.js";
 import { materializeTasks, refreshReadyTasks, validatePlan } from "../runtime/graph.js";
+import { hashObject } from "../runtime/hash.js";
 
 function task(overrides = {}) {
   return {
@@ -217,4 +222,50 @@ test("completion requires distinct current-tree reviewers for every task", () =>
 
   assert.equal(result.allowed, false);
   assert.match(result.reasons.join("\n"), /task two requires 2 independent current-tree reviews/);
+});
+
+test("legacy schema-version-1 runs preserve their pre-mode configuration hash", () => {
+  const planned = task();
+  const legacy = completeState([planned], []);
+  const standard = { ...legacy, mode: "standard" };
+  const tough = { ...legacy, mode: "tough" };
+  const preModeHash = hashObject({
+    lane: legacy.lane,
+    nonGoals: legacy.nonGoals,
+    tasks: legacy.tasks.map(
+      ({ id, dependencies, acceptanceCriteria, ownedPaths, checks, risk }) => ({
+        id,
+        dependencies,
+        acceptanceCriteria,
+        ownedPaths,
+        checks,
+        risk,
+      }),
+    ),
+  });
+
+  assert.equal(effectiveRunMode(legacy), "standard");
+  assert.equal(currentConfigHash(legacy), preModeHash);
+  assert.notEqual(currentConfigHash(legacy), currentConfigHash(standard));
+  assert.notEqual(currentConfigHash(legacy), currentConfigHash(tough));
+});
+
+test("tough mode requires two reviewers even for documentation-only tasks", () => {
+  const treeHash = "tree";
+  const planned = task({ ownedPaths: ["README.md"] });
+
+  const standard = completeState([planned], []);
+  const standardConfig = currentConfigHash(standard);
+  standard.evidence = currentEvidenceForTask(planned, planned.id, treeHash, standardConfig)
+    .filter((entry) => entry.reviewer !== "adversarial-reviewer");
+  assert.equal(evaluateCompletion(standard, treeHash, standardConfig).allowed, true);
+
+  const tough = { ...completeState([planned], []), mode: "tough" };
+  const toughConfig = currentConfigHash(tough);
+  tough.evidence = currentEvidenceForTask(planned, planned.id, treeHash, toughConfig)
+    .filter((entry) => entry.reviewer !== "adversarial-reviewer");
+  const result = evaluateCompletion(tough, treeHash, toughConfig);
+
+  assert.equal(result.allowed, false);
+  assert.match(result.reasons.join("\n"), /requires 2 independent current-tree reviews/);
 });

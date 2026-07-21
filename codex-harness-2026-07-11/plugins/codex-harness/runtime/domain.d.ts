@@ -1,6 +1,8 @@
 export declare const RUN_STATUSES: readonly ["created", "planning", "issue_sync", "executing", "verifying", "reviewing", "remediating", "integrating", "complete", "failed", "blocked", "cancelled"];
 export type RunStatus = (typeof RUN_STATUSES)[number];
 export type Lane = "fast" | "build" | "deep" | "autonomous";
+export declare const RUN_MODES: readonly ["standard", "tough"];
+export type RunMode = (typeof RUN_MODES)[number];
 export type TaskStatus = "pending" | "ready" | "running" | "verifying" | "committed" | "reviewed" | "complete" | "failed" | "blocked";
 export interface CommandSpec {
     argv: string[];
@@ -80,12 +82,18 @@ export interface AgentAttempt {
     threadId?: string;
     exitCode?: number;
     failureFingerprint?: string;
+    /** Tough-mode planner or builder report, redacted before it enters the ledger. */
+    summary?: string;
+    /** Tough-mode reviewer concerns that are reported without becoming requirements. */
+    residualRisks?: string[];
 }
 export interface RunState {
     schemaVersion: 1;
     id: string;
     goal: string;
     lane: Lane;
+    /** Missing on legacy schemaVersion 1 runs and interpreted as standard. */
+    mode?: RunMode;
     status: RunStatus;
     repoRoot: string;
     gitCommonDir: string;
@@ -111,6 +119,8 @@ export interface RunState {
         startedAt: string;
     };
 }
+export declare const TOUGH_MODE_NON_GOAL = "Inventing or implementing product security, safety, protective behavior, or operational constraints that the user did not request and the repository does not already require.";
+export declare const TOUGH_MODE_ACCEPTANCE_CRITERION = "No unrequested product security, safety, protective behavior, or operational constraint is added; identified concerns are reported without implementing them.";
 export interface JournalEvent {
     schemaVersion: 1;
     eventId: string;
@@ -123,7 +133,10 @@ export interface JournalEvent {
     hash: string;
 }
 export declare function assertRunTransition(from: RunStatus, to: RunStatus): void;
-export declare function currentConfigHash(state: Pick<RunState, "lane" | "tasks" | "nonGoals">): string;
+export declare function effectiveRunMode(state: Pick<RunState, "mode">): RunMode;
+export declare function applyRunModeToPlanTasks(state: Pick<RunState, "mode">, tasks: PlannedTask[]): PlannedTask[];
+export declare function normalizeNonGoalsForRunMode(state: Pick<RunState, "mode">, nonGoals: string[]): string[];
+export declare function currentConfigHash(state: Pick<RunState, "lane" | "mode" | "tasks" | "nonGoals">): string;
 export interface CompletionResult {
     allowed: boolean;
     reasons: string[];

@@ -1,4 +1,4 @@
-import type { Lane, RunState } from "./domain.js";
+import { type Lane, type RunMode, type RunState } from "./domain.js";
 export declare class RunStore {
     readonly root: string;
     private readonly runsRoot;
@@ -8,6 +8,7 @@ export declare class RunStore {
     create(input: {
         goal: string;
         lane: Lane;
+        mode?: RunMode;
         repoRoot: string;
         gitCommonDir: string;
         now?: Date;
@@ -15,6 +16,7 @@ export declare class RunStore {
     createOrReuse(input: {
         goal: string;
         lane: Lane;
+        mode?: RunMode;
         repoRoot: string;
         gitCommonDir: string;
         now?: Date;

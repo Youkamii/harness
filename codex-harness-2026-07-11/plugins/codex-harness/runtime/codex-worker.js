@@ -74,9 +74,11 @@ export async function runCodexWorker(request) {
         const output = JSON.parse(await readFile(outputFile, "utf8"));
         normalizeWorkerOutput(request.role, output);
         validateWorkerOutput(request.role, output);
+        const report = request.captureReport ? workerReport(request.role, output) : {};
         await finishAgentAttempt(request.store, request.runId, attempt.id, {
             status: "complete",
             exitCode: 0,
+            ...report,
         });
         return output;
     }
@@ -153,7 +155,8 @@ function validateWorkerOutput(role, value) {
         !Array.isArray(review.commands) ||
         !Array.isArray(review.criteria) ||
         !Array.isArray(review.findings) ||
-        !Array.isArray(review.residualRisks)) {
+        !Array.isArray(review.residualRisks) ||
+        review.residualRisks.some((risk) => typeof risk !== "string")) {
         throw new Error("review output is incomplete");
     }
     for (const finding of review.findings) {
@@ -169,6 +172,18 @@ function validateWorkerOutput(role, value) {
             throw new Error("review finding is malformed");
         }
     }
+}
+function workerReport(role, output) {
+    if (role === "planner" || role === "builder") {
+        const summary = redactSecrets(output.summary).trim().slice(0, 4_000);
+        return summary ? { summary } : {};
+    }
+    const residualRisks = [
+        ...new Set(output.residualRisks
+            .map((risk) => redactSecrets(risk).trim().slice(0, 1_000))
+            .filter(Boolean)),
+    ].slice(0, 100);
+    return residualRisks.length > 0 ? { residualRisks } : {};
 }
 async function spawnCodex(input) {
     return await new Promise((resolve, reject) => {
@@ -313,5 +328,9 @@ export function codexArgumentsForTest(role, cwd, schema, output) {
 }
 export function validateWorkerOutputForTest(role, value) {
     validateWorkerOutput(role, value);
+}
+export function workerReportForTest(role, value) {
+    validateWorkerOutput(role, value);
+    return workerReport(role, value);
 }
 //# sourceMappingURL=codex-worker.js.map

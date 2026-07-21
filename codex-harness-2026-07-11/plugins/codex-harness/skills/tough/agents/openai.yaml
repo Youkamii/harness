@@ -1,0 +1,7 @@
+interface:
+  display_name: "Tough"
+  short_description: "Implement requested behavior without invented safeguards"
+  default_prompt: "Use $tough to implement exactly what I requested without inventing product safeguards."
+
+policy:
+  allow_implicit_invocation: true
