@@ -1,6 +1,10 @@
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  validateTailBroomstickAssets,
+  validateTailBroomstickManifest,
+} from "./tail-broomstick-lib.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const pluginRoot = path.join(root, "plugins", "codex-harness");
@@ -18,6 +22,7 @@ async function loadJson(relativePath) {
 
 const manifest = await loadJson("plugins/codex-harness/.codex-plugin/plugin.json");
 const marketplace = await loadJson(".agents/plugins/marketplace.json");
+const tailIntegration = await loadJson("integrations/tail-broomstick.json");
 
 if (manifest) {
   if (manifest.name !== "codex-harness") failures.push("plugin name must be codex-harness");
@@ -33,6 +38,25 @@ if (marketplace) {
   if (!entry) failures.push("marketplace is missing codex-harness");
   if (entry?.source?.path !== "./plugins/codex-harness") {
     failures.push("marketplace plugin source must be ./plugins/codex-harness");
+  }
+  if (tailIntegration) {
+    const tailEntry = marketplace.plugins?.find((item) => item.name === tailIntegration.plugin.name);
+    if (tailEntry?.source?.path !== tailIntegration.plugin.source) {
+      failures.push("marketplace Tail Broomstick source must match its integration manifest");
+    }
+    if (tailEntry?.policy?.installation !== tailIntegration.plugin.installationPolicy
+        || tailEntry?.policy?.authentication !== tailIntegration.plugin.authenticationPolicy) {
+      failures.push("marketplace Tail Broomstick policy must match its integration manifest");
+    }
+  }
+}
+
+if (tailIntegration) {
+  if (!validateTailBroomstickManifest(tailIntegration)) {
+    failures.push("Tail Broomstick integration contract drifted from its fixed security boundary");
+  }
+  if (!(await validateTailBroomstickAssets(tailIntegration, root))) {
+    failures.push("Tail Broomstick integration assets drifted from their fixed contract");
   }
 }
 

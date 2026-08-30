@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tail Broomstick Core"
+  short_description: "Register a secret alias outside model-visible chat."
+  default_prompt: "Use $tail-broomstick-core to register github-work without placing a secret in chat."

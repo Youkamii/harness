@@ -1,5 +1,33 @@
 # Codex Harness
 
+## Tail Broomstick core capability
+
+Tail Broomstick joins the harness as a separate, optional plugin. `npm run
+install:plugin` installs its skill, MCP server, and pre-model prompt hook only
+when the fixed Windows broker passes the closed `tb doctor --json` contract and
+a value-free MCP handshake on the tested Codex 0.149.1 release. A missing broker is reported as `UNAVAILABLE`; a broken
+contract, stale enabled plugin, or configuration drift is `DEGRADED`. Neither
+case prevents the main harness plugin from installing.
+
+```powershell
+npm run tail-broomstick:status
+```
+
+The status is value-free. It reports only the integration schema, capability
+and version, `AVAILABLE | UNAVAILABLE | DEGRADED`, runtime/plugin state, and a
+closed reason code. It never opens the vault, consent UI, or Windows Hello.
+
+```powershell
+npm run smoke:tail-broomstick
+```
+
+The prompt-fire smoke uses a disposable Codex profile, installs a disposable
+copy of the checked plugin, and substitutes only its broker process with a
+local fixture. It proves that an ordinary prompt reaches a loopback provider
+while invalid and exact `tb:` commands finish with zero model tokens and no
+provider contact. It never opens the installed broker, a credential, UAC, or
+Windows Hello.
+
 ## Run modes
 
 Run mode is separate from the `fast | build | deep | autonomous` lane:

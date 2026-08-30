@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "tail_broomstick_hook": {
+      "type": "stdio",
+      "command": "C:\\Program Files\\Tail Broomstick\\tb.exe",
+      "args": ["mcp", "codex-hook"],
+      "env_vars": [
+        "SystemRoot",
+        "WINDIR",
+        "SystemDrive",
+        "ProgramData",
+        "ProgramFiles",
+        "ProgramFiles(x86)",
+        "ProgramW6432"
+      ],
+      "cwd": ".",
+      "enabled": true,
+      "required": true,
+      "enabled_tools": ["tail_broomstick.codex_user_prompt_submit"],
+      "default_tools_approval_mode": "prompt",
+      "startup_timeout_sec": 10,
+      "tool_timeout_sec": 150
+    }
+  }
+}

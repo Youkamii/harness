@@ -1,0 +1,23 @@
+{
+  "name": "tail-broomstick-core",
+  "version": "0.1.0",
+  "description": "Optional harness capability for alias-only protected secret entry",
+  "author": {
+    "name": "Youkamii",
+    "url": "https://github.com/Youkamii"
+  },
+  "homepage": "https://github.com/Youkamii/harness/tree/main/codex-harness-2026-07-11",
+  "repository": "https://github.com/Youkamii/harness",
+  "license": "MIT",
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Tail Broomstick Core",
+    "shortDescription": "Keep secret values outside model-visible chat",
+    "longDescription": "Adds Tail Broomstick's trusted pre-model Codex hook only when the installed Windows broker reports READY.",
+    "developerName": "Youkamii",
+    "category": "Developer Tools",
+    "capabilities": [],
+    "defaultPrompt": "Use $tail-broomstick-core to register a public alias without putting a secret in chat."
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "description": "Intercept Tail Broomstick's reserved prompt namespace before model delivery",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "tail_broomstick_hook",
+            "tool": "tail_broomstick.codex_user_prompt_submit",
+            "input": {
+              "prompt": "${prompt}"
+            },
+            "timeout": 180
+          }
+        ]
+      }
+    ]
+  }
+}

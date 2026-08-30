@@ -12,6 +12,8 @@
     "eval": "npm run build && node scripts/eval.mjs",
     "doctor": "npm run build && node plugins/codex-harness/runtime/cli.js doctor",
     "install:plugin": "npm run build && node scripts/install.mjs",
+    "tail-broomstick:status": "npm run build && node scripts/tail-broomstick-status.mjs",
+    "smoke:tail-broomstick": "npm run build && node scripts/tail-broomstick-codex-smoke.mjs",
     "smoke:agent": "npm run build && node scripts/smoke-agent.mjs"
   },
   "devDependencies": {

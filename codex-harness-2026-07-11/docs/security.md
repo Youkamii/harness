@@ -15,6 +15,25 @@ The controller uses argument arrays with `shell: false` for Codex, Git, GitHub C
 - Before any planned check runs, an inert probe must prove that the same sandbox cannot reach the public network. If the OS sandbox is unavailable or permits direct access, verification fails closed without executing the planned command.
 - Authoritative state is kept in the Git common directory, outside all worker worktrees.
 
+The optional Tail Broomstick readiness probe uses the fixed installed
+`tb.exe doctor --json` path with no shell, no `PATH`, and only seven OS path
+variables. Its stdout is size-bounded and must match a canonical value-free
+schema exactly. Raw stdout, stderr, paths, and spawn errors are never included
+in the capability report. A second bounded probe sends only MCP initialize and
+tools/list messages and requires the expected prompt hook schema; it never sends
+a prompt or credential value. The probe does not request user consent; secret
+entry remains inside the separately installed broker boundary. The plugin is
+enabled only on the tested Codex 0.149.1 release and names only the same seven OS
+variables in its MCP forwarding list; Codex clears the stdio child environment
+before rebuilding its allowlisted baseline. The MCP startup plus tool deadline
+is 160 seconds, leaving twenty seconds before the 180-second host hook deadline.
+
+The prompt-fire smoke runs only in a disposable `CODEX_HOME`, removes ambient
+credential variables, and points model traffic at a loopback tripwire. It uses
+Codex's hook-trust bypass only for that isolated copied plugin so the test is
+non-interactive; production installation and controller execution never emit
+that flag. The fixture records one fixed word, never prompt text or a value.
+
 `-a never` means workers cannot interrupt the user with approval requests. It does not bypass the sandbox. The dangerous Codex bypass flags are never emitted.
 
 ## Git and remote effects

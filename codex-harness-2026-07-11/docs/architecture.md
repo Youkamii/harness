@@ -22,6 +22,31 @@ flowchart TD
     C <--> J[(Hash-chained journal in Git common dir)]
 ```
 
+## Optional Tail Broomstick core
+
+`integrations/tail-broomstick.json` owns the supported platform, plugin
+version, exact tested Codex version, fixed broker image, doctor argv, MCP argv,
+forwarded OS-variable allowlist, hook event, tool name, timeouts, and the full
+plugin file allowlist with SHA-256 hashes. Repository validation rejects
+unlisted files and any drift between that contract and the checked-in plugin.
+
+The installer probes the fixed broker with a seven-variable Windows environment
+and accepts only canonical schema-version-1 doctor JSON whose aggregate state
+is consistent. A value-free MCP initialize and tools/list handshake must also
+expose the pinned hook tool. It installs `tail-broomstick-core@youkamii-harness`
+only when both probes pass on Codex 0.149.1. Add, remove, and final list failures
+make the installer fail after preserving the independently installed main
+harness. If the runtime later becomes unavailable, the next maintenance install
+removes the optional plugin so its required MCP server cannot disrupt unrelated
+harness skills. The main `codex-harness` plugin has no dependency on this path.
+
+The repository-owned prompt-fire smoke validates the checked contract, stages
+the same plugin in a disposable marketplace, and replaces only the fixed broker
+command with a local MCP fixture. On Codex 0.149.1, its control prompt must
+contact a loopback provider; reserved invalid and exact alias commands must
+finish before provider contact with zero model tokens. This validates host
+wiring without touching an installed broker or credential.
+
 Codex workers reason, inspect, edit, and review. The TypeScript controller alone owns run state, GitHub mutations, Git staging and commits, task transitions, retries, evidence normalization, and the completion decision.
 
 ## State model

@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "id": "tail-broomstick-core",
+  "version": "0.1.0",
+  "platform": "win32",
+  "codexVersion": "0.149.1",
+  "plugin": {
+    "name": "tail-broomstick-core",
+    "marketplace": "youkamii-harness",
+    "source": "./plugins/tail-broomstick-core",
+    "installationPolicy": "AVAILABLE",
+    "authenticationPolicy": "ON_INSTALL"
+  },
+  "broker": {
+    "executable": "C:\\Program Files\\Tail Broomstick\\tb.exe",
+    "doctorArgs": ["doctor", "--json"],
+    "mcpArgs": ["mcp", "codex-hook"],
+    "environmentVariables": [
+      "SystemRoot",
+      "WINDIR",
+      "SystemDrive",
+      "ProgramData",
+      "ProgramFiles",
+      "ProgramFiles(x86)",
+      "ProgramW6432"
+    ]
+  },
+  "doctor": {
+    "schemaVersion": 1,
+    "timeoutMs": 10000,
+    "maxOutputBytes": 262144
+  },
+  "mcp": {
+    "server": "tail_broomstick_hook",
+    "tool": "tail_broomstick.codex_user_prompt_submit",
+    "cwd": ".",
+    "startupTimeoutSeconds": 10,
+    "toolTimeoutSeconds": 150
+  },
+  "hook": {
+    "event": "UserPromptSubmit",
+    "timeoutSeconds": 180
+  },
+  "skill": {
+    "name": "tail-broomstick-core"
+  },
+  "assets": [
+    {
+      "path": ".codex-plugin/plugin.json",
+      "sha256": "c32e43be1f7f1d43fa9a03ad80417e2f3ec563b132b863b2114f6b90e63427ec"
+    },
+    {
+      "path": ".mcp.json",
+      "sha256": "5c436b3eec118cd695006abc5d9d372b90a9677ecb630906bbcbde4178d7a602"
+    },
+    {
+      "path": "hooks/hooks.json",
+      "sha256": "e8e369a51ba4e497f5853f1c03f43bc32d4721ee7abab6ff447eceee5eb8335a"
+    },
+    {
+      "path": "skills/tail-broomstick-core/SKILL.md",
+      "sha256": "b84c88c5cc5184ac9db2f85d61e06a2a4cb9e94550fd392a9ac4033517ffc34d"
+    },
+    {
+      "path": "skills/tail-broomstick-core/agents/openai.yaml",
+      "sha256": "87f5233ac3ff49707ed59c2efd6d471c57585d66cbd0fca5f18a00330882d971"
+    }
+  ]
+}
