@@ -20,7 +20,7 @@ import {
   setTaskStatus,
   startAgentAttempt,
 } from "../runtime/operations.js";
-import { RunStore } from "../runtime/store.js";
+import { RunStore, retryTransientLockIoForTest } from "../runtime/store.js";
 
 async function withTempStore(callback) {
   const root = await mkdtemp(path.join(os.tmpdir(), "codex-harness-store-"));
@@ -539,6 +539,33 @@ test("store serializes concurrent agent updates without losing events", async ()
     assert.equal(state.assumptions.length, 12);
     assert.equal(new Set(state.assumptions).size, 12);
   });
+});
+
+test("lock reads retry bounded transient Windows EPERM failures", async () => {
+  let attempts = 0;
+  const value = await retryTransientLockIoForTest(async () => {
+    attempts += 1;
+    if (attempts < 3) {
+      throw Object.assign(new Error("synthetic transient lock contention"), {
+        code: "EPERM",
+      });
+    }
+    return "acquired";
+  });
+  assert.equal(value, "acquired");
+  assert.equal(attempts, 3);
+
+  attempts = 0;
+  await assert.rejects(
+    retryTransientLockIoForTest(async () => {
+      attempts += 1;
+      throw Object.assign(new Error("synthetic persistent lock denial"), {
+        code: "EPERM",
+      });
+    }),
+    { code: "EPERM" },
+  );
+  assert.equal(attempts, 5);
 });
 
 test("remediating a prerequisite makes its dependent wait again", async () => {

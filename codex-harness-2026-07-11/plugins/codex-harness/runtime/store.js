@@ -293,7 +293,8 @@ async function lastEventHash(eventPath) {
 }
 async function readLock(lockPath) {
     try {
-        const value = JSON.parse(await readFile(lockPath, "utf8"));
+        const text = await retryTransientLockIo(() => readFile(lockPath, "utf8"));
+        const value = JSON.parse(text);
         if (!Number.isSafeInteger(value.pid) ||
             (value.pid ?? 0) <= 0 ||
             typeof value.host !== "string" ||
@@ -319,6 +320,25 @@ async function readLock(lockPath) {
         }
         throw error;
     }
+}
+async function retryTransientLockIo(operation) {
+    let lastError;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+        try {
+            return await operation();
+        }
+        catch (error) {
+            lastError = error;
+            if (error.code !== "EPERM" || attempt === 4) {
+                throw error;
+            }
+            await delay(10 * (attempt + 1));
+        }
+    }
+    throw lastError;
+}
+export async function retryTransientLockIoForTest(operation) {
+    return await retryTransientLockIo(operation);
 }
 async function reclaimDeadSameHostLock(lockPath, observed) {
     if (observed.host !== os.hostname() || isProcessAlive(observed.pid))

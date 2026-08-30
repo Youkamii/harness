@@ -349,7 +349,8 @@ async function lastEventHash(eventPath: string): Promise<string> {
 
 async function readLock(lockPath: string): Promise<LockRecord | undefined> {
   try {
-    const value = JSON.parse(await readFile(lockPath, "utf8")) as Partial<LockRecord>;
+    const text = await retryTransientLockIo(() => readFile(lockPath, "utf8"));
+    const value = JSON.parse(text) as Partial<LockRecord>;
     if (
       !Number.isSafeInteger(value.pid) ||
       (value.pid ?? 0) <= 0 ||
@@ -379,6 +380,28 @@ async function readLock(lockPath: string): Promise<LockRecord | undefined> {
     }
     throw error;
   }
+}
+
+async function retryTransientLockIo<T>(operation: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if ((error as NodeJS.ErrnoException).code !== "EPERM" || attempt === 4) {
+        throw error;
+      }
+      await delay(10 * (attempt + 1));
+    }
+  }
+  throw lastError;
+}
+
+export async function retryTransientLockIoForTest<T>(
+  operation: () => Promise<T>,
+): Promise<T> {
+  return await retryTransientLockIo(operation);
 }
 
 async function reclaimDeadSameHostLock(

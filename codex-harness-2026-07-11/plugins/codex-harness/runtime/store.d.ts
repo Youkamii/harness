@@ -32,3 +32,4 @@ export declare class RunStore {
     private withLock;
     private withFileLock;
 }
+export declare function retryTransientLockIoForTest<T>(operation: () => Promise<T>): Promise<T>;
