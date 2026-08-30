@@ -20,7 +20,7 @@ import {
   setTaskStatus,
   startAgentAttempt,
 } from "../runtime/operations.js";
-import { RunStore, retryTransientLockIoForTest } from "../runtime/store.js";
+import { RunStore } from "../runtime/store.js";
 
 async function withTempStore(callback) {
   const root = await mkdtemp(path.join(os.tmpdir(), "codex-harness-store-"));
@@ -542,30 +542,53 @@ test("store serializes concurrent agent updates without losing events", async ()
 });
 
 test("lock reads retry bounded transient Windows EPERM failures", async () => {
-  let attempts = 0;
-  const value = await retryTransientLockIoForTest(async () => {
-    attempts += 1;
-    if (attempts < 3) {
-      throw Object.assign(new Error("synthetic transient lock contention"), {
-        code: "EPERM",
-      });
-    }
-    return "acquired";
-  });
-  assert.equal(value, "acquired");
-  assert.equal(attempts, 3);
+  const root = await mkdtemp(path.join(os.tmpdir(), "codex-harness-store-"));
+  try {
+    const lockPath = path.join(root, "controller.lock");
+    await writeFile(lockPath, lockRecord(await exitedPid(), "dead-owner"), "utf8");
+    let attempts = 0;
+    const store = new RunStore(root, async (target) => {
+      if (target === lockPath && attempts < 2) {
+        attempts += 1;
+        throw Object.assign(new Error("synthetic transient lock contention"), {
+          code: "EPERM",
+        });
+      }
+      return await readFile(target, "utf8");
+    });
+    const created = await store.create({
+      goal: "recover after transient lock read",
+      lane: "build",
+      repoRoot: "/repo",
+      gitCommonDir: "/repo/.git",
+    });
+    assert.equal(created.goal, "recover after transient lock read");
+    assert.equal(attempts, 2);
 
-  attempts = 0;
-  await assert.rejects(
-    retryTransientLockIoForTest(async () => {
-      attempts += 1;
-      throw Object.assign(new Error("synthetic persistent lock denial"), {
-        code: "EPERM",
-      });
-    }),
-    { code: "EPERM" },
-  );
-  assert.equal(attempts, 5);
+    await writeFile(lockPath, lockRecord(process.pid, "live-owner"), "utf8");
+    attempts = 0;
+    const deniedStore = new RunStore(root, async (target) => {
+      if (target === lockPath) {
+        attempts += 1;
+        throw Object.assign(new Error("synthetic persistent lock denial"), {
+          code: "EPERM",
+        });
+      }
+      return await readFile(target, "utf8");
+    });
+    await assert.rejects(
+      deniedStore.create({
+        goal: "must remain denied",
+        lane: "build",
+        repoRoot: "/repo",
+        gitCommonDir: "/repo/.git",
+      }),
+      { code: "EPERM" },
+    );
+    assert.equal(attempts, 5);
+  } finally {
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  }
 });
 
 test("remediating a prerequisite makes its dependent wait again", async () => {

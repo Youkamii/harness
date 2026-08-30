@@ -1,9 +1,11 @@
 import { type Lane, type RunMode, type RunState } from "./domain.js";
+type LockReader = (lockPath: string) => Promise<string>;
 export declare class RunStore {
     readonly root: string;
     private readonly runsRoot;
     private readonly lockPath;
-    constructor(root: string);
+    private readonly lockReader;
+    constructor(root: string, lockReader?: LockReader);
     initialize(): Promise<void>;
     create(input: {
         goal: string;
@@ -32,4 +34,4 @@ export declare class RunStore {
     private withLock;
     private withFileLock;
 }
-export declare function retryTransientLockIoForTest<T>(operation: () => Promise<T>): Promise<T>;
+export {};

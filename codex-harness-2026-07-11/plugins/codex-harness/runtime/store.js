@@ -8,10 +8,12 @@ export class RunStore {
     root;
     runsRoot;
     lockPath;
-    constructor(root) {
+    lockReader;
+    constructor(root, lockReader = async (lockPath) => await readFile(lockPath, "utf8")) {
         this.root = path.resolve(root);
         this.runsRoot = path.join(this.root, "runs");
         this.lockPath = path.join(this.root, "controller.lock");
+        this.lockReader = lockReader;
     }
     async initialize() {
         await mkdir(this.runsRoot, { recursive: true, mode: 0o700 });
@@ -208,7 +210,7 @@ export class RunStore {
         while (!acquired) {
             const reclaimPath = `${lockPath}.reclaim`;
             if (await pathExists(reclaimPath)) {
-                await recoverAbandonedLockFile(reclaimPath);
+                await recoverAbandonedLockFile(reclaimPath, this.lockReader);
             }
             if (await pathExists(reclaimPath)) {
                 if (Date.now() >= deadline)
@@ -220,10 +222,12 @@ export class RunStore {
             acquired = await tryAcquireLock(lockPath, record);
             if (acquired)
                 break;
-            existing = await readLock(lockPath);
-            if (existing && (await reclaimDeadSameHostLock(lockPath, existing)))
+            existing = await readLock(lockPath, this.lockReader);
+            if (existing &&
+                (await reclaimDeadSameHostLock(lockPath, existing, this.lockReader))) {
                 continue;
-            if (!existing && (await removeStaleInvalidLock(lockPath)))
+            }
+            if (!existing && (await removeStaleInvalidLock(lockPath, this.lockReader)))
                 continue;
             if (Date.now() >= deadline)
                 throw lockedError(label, existing);
@@ -232,13 +236,13 @@ export class RunStore {
         }
         try {
             if (await pathExists(`${lockPath}.reclaim`)) {
-                await removeOwnedLock(lockPath, record);
+                await removeOwnedLock(lockPath, record, this.lockReader);
                 return await this.withFileLock(lockPath, label, operation);
             }
             return await operation();
         }
         finally {
-            await removeOwnedLock(lockPath, record);
+            await removeOwnedLock(lockPath, record, this.lockReader);
         }
     }
 }
@@ -291,9 +295,9 @@ async function lastEventHash(eventPath) {
         throw error;
     }
 }
-async function readLock(lockPath) {
+async function readLock(lockPath, lockReader) {
     try {
-        const text = await retryTransientLockIo(() => readFile(lockPath, "utf8"));
+        const text = await retryTransientLockIo(() => lockReader(lockPath));
         const value = JSON.parse(text);
         if (!Number.isSafeInteger(value.pid) ||
             (value.pid ?? 0) <= 0 ||
@@ -337,10 +341,7 @@ async function retryTransientLockIo(operation) {
     }
     throw lastError;
 }
-export async function retryTransientLockIoForTest(operation) {
-    return await retryTransientLockIo(operation);
-}
-async function reclaimDeadSameHostLock(lockPath, observed) {
+async function reclaimDeadSameHostLock(lockPath, observed, lockReader) {
     if (observed.host !== os.hostname() || isProcessAlive(observed.pid))
         return false;
     const reclaimPath = `${lockPath}.reclaim`;
@@ -353,7 +354,7 @@ async function reclaimDeadSameHostLock(lockPath, observed) {
     if (!(await tryAcquireLock(reclaimPath, guardRecord)))
         return false;
     try {
-        const current = await readLock(lockPath);
+        const current = await readLock(lockPath, lockReader);
         if (!current ||
             current.ownerId !== observed.ownerId ||
             current.host !== os.hostname() ||
@@ -364,7 +365,7 @@ async function reclaimDeadSameHostLock(lockPath, observed) {
         return true;
     }
     finally {
-        await removeOwnedLock(reclaimPath, guardRecord);
+        await removeOwnedLock(reclaimPath, guardRecord, lockReader);
     }
 }
 async function tryAcquireLock(lockPath, record) {
@@ -391,16 +392,16 @@ async function tryAcquireLock(lockPath, record) {
         await rm(candidate, { force: true });
     }
 }
-async function recoverAbandonedLockFile(lockPath) {
-    const owner = await readLock(lockPath);
+async function recoverAbandonedLockFile(lockPath, lockReader) {
+    const owner = await readLock(lockPath, lockReader);
     if (owner && owner.host === os.hostname() && !isProcessAlive(owner.pid)) {
-        await removeOwnedLock(lockPath, owner);
+        await removeOwnedLock(lockPath, owner, lockReader);
         return;
     }
     if (!owner)
-        await removeStaleInvalidLock(lockPath);
+        await removeStaleInvalidLock(lockPath, lockReader);
 }
-async function removeStaleInvalidLock(lockPath) {
+async function removeStaleInvalidLock(lockPath, lockReader) {
     let metadata;
     try {
         metadata = await stat(lockPath);
@@ -412,7 +413,7 @@ async function removeStaleInvalidLock(lockPath) {
     }
     if (Date.now() - metadata.mtimeMs < 30 * 60 * 1_000)
         return false;
-    if (await readLock(lockPath))
+    if (await readLock(lockPath, lockReader))
         return false;
     await rm(lockPath, { force: true });
     return true;
@@ -426,8 +427,8 @@ function isProcessAlive(pid) {
         return error.code !== "ESRCH";
     }
 }
-async function removeOwnedLock(lockPath, owner) {
-    const current = await readLock(lockPath);
+async function removeOwnedLock(lockPath, owner, lockReader) {
+    const current = await readLock(lockPath, lockReader);
     if (current?.ownerId === owner.ownerId)
         await rm(lockPath, { force: true });
 }
